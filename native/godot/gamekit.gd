@@ -10,9 +10,16 @@ var pending: Array = []
 var revision := 0
 var connected := false
 var elapsed := 0.0
+var observation_interval := 0.05
 var last_observation := ""
 
 func _initialize() -> void:
+	var rate = ProjectSettings.get_setting("gamekit/observation_hz", 20.0)
+	if not (rate is int or rate is float) or not is_finite(float(rate)) or rate < 1 or rate > 60:
+		printerr("gamekit/observation_hz must be a number between 1 and 60")
+		quit(2)
+		return
+	observation_interval = 1.0 / float(rate)
 	Engine.max_fps = 60
 	call_deferred("_start_game")
 
@@ -105,8 +112,8 @@ func _process(delta: float) -> bool:
 			failure = game.command(request.op, request.args)
 		_emit(request.id, null if failure.is_empty() else failure)
 	elapsed += delta
-	if connected and elapsed >= 0.05:
-		elapsed = 0.0
+	if connected and elapsed >= observation_interval:
+		elapsed = fmod(elapsed, observation_interval)
 		_emit(null)
 	return false
 

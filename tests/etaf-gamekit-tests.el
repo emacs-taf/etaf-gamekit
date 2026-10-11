@@ -288,5 +288,55 @@
           (should (string-match-p "Action rejected" (etaf-gamekit-test--text session))))
       (etaf-gamekit-test--dispose session))))
 
+(defun etaf-gamekit-test--clock-project (rate)
+  "Create an owned SDK fixture configured with Godot setting RATE."
+  (let ((directory (make-temp-file "gamekit-clock-" t)))
+    (copy-file (expand-file-name "fixtures/clock.gd" etaf-gamekit-test--directory)
+               (expand-file-name "clock.gd" directory))
+    (with-temp-file (expand-file-name "project.godot" directory)
+      (insert "config_version=5\n[application]\nrun/flush_stdout_on_print=true\n"
+              "[gamekit]\ngame_script=\"res://clock.gd\"\nobservation_hz=" rate "\n"))
+    directory))
+
+(etaf-gamekit-define-game etaf-gamekit-test--clock :backend 'godot :title "Native clock")
+
+(ert-deftest etaf-gamekit-godot-project-controls-stream-cadence ()
+  "A project's rate changes autonomous observation spacing, not its clock."
+  (dolist (rate '(1 60))
+    (let ((directory (etaf-gamekit-test--clock-project (number-to-string rate))) session)
+      (unwind-protect
+          (progn
+            (setq session (etaf-gamekit-start etaf-gamekit-test--clock :options (list :project directory)))
+            (etaf-gamekit-test--wait session)
+            (etaf-gamekit-action session "run")
+            (etaf-gamekit-test--wait session)
+            ;; Compare two native timestamps; no dependency on wall-clock
+            ;; benchmark budgets or any private bridge representation.
+            (let ((previous (plist-get (etaf-gamekit-observation session) :seconds)))
+              (etaf-gamekit-test--wait session
+                (lambda () (> (plist-get (etaf-gamekit-observation session) :seconds) previous))))
+            (let* ((before (plist-get (etaf-gamekit-observation session) :seconds))
+                   (deadline (+ (float-time) 5)) after)
+              (while (and (< (float-time) deadline)
+                          (<= (setq after (plist-get (etaf-gamekit-observation session) :seconds)) before))
+                (accept-process-output nil 0.002))
+              (let ((advance (- after before)))
+                (should (> advance 0))
+                (if (= rate 1) (should (> advance 0.5)) (should (< advance 0.25)))))
+            (should-not (etaf-gamekit-last-error session)))
+        (etaf-gamekit-test--dispose session) (delete-directory directory t)))))
+
+(ert-deftest etaf-gamekit-godot-rejects-invalid-stream-rates ()
+  "Invalid project settings fail startup and surface the actionable reason."
+  (dolist (rate '("0" "61" "\"fast\""))
+    (let ((directory (etaf-gamekit-test--clock-project rate)) session)
+      (unwind-protect
+          (progn
+            (setq session (etaf-gamekit-start etaf-gamekit-test--clock :options (list :project directory)))
+            (etaf-gamekit-test--wait session)
+            (should (eq (etaf-gamekit-status session) 'failed))
+            (should (string-match-p "observation_hz must be" (etaf-gamekit-last-error session))))
+        (etaf-gamekit-test--dispose session) (delete-directory directory t)))))
+
 (provide 'etaf-gamekit-tests)
 ;;; etaf-gamekit-tests.el ends here

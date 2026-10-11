@@ -75,10 +75,12 @@ JSON fields so unchanged data does not invalidate unrelated panels.
 Both interfaces return detached values; editing a returned value never changes
 the game or the framework's retained observation.
 
-Unsolicited publication is coalesced to at most 60 Hz. Intermediate streamed
-frames may be skipped. Acknowledged input publishes on the next Emacs event-loop
-turn, with a response burst sharing one publication. Rendering and event-loop
-work add to those scheduling intervals.
+Unsolicited publication is coalesced to at most 60 Hz. An update outside the
+current rate window publishes on the next Emacs event-loop turn; updates inside
+the window share its remaining delay rather than starting another full wait.
+Intermediate streamed frames may be skipped. Acknowledged input bypasses the
+rate window and publishes on the next turn, with a response burst sharing one
+publication. Rendering and event-loop work add to those scheduling intervals.
 
 Actions use an advertised operation string and keyword-plist arguments. Objects
 are keyword plists, outgoing arrays are vectors, JSON false is `:false` and null
@@ -125,9 +127,23 @@ script extending Node or Node2D. The script implements:
 - `observe() -> Dictionary`: the game's complete JSON observation.
 
 The framework's shared bridge handles stdin, ordered requests, shutdown and
-changed-state publication at up to 20 Hz. Commands and simulation run on
-Godot's main thread. Godot starts with `--headless --no-header`; ETAF owns all
-presentation and input. Game scripts keep stdout reserved for the bridge.
+changed-state publication. `gamekit/observation_hz` in `project.godot` selects
+the maximum unsolicited state rate, from 1 to 60 Hz; omission keeps the 20 Hz
+default. Invalid rates fail startup with an explanatory error. For example:
+
+```ini
+[gamekit]
+game_script="res://game.gd"
+observation_hz=60
+```
+
+The bridge retains the fractional interval remainder instead of losing a
+simulation tick at each publication. Unchanged observations are not sent;
+acknowledged commands are independent of this rate. This setting does not
+change the game's physics rate or promise a display frame rate. Commands and
+simulation run on Godot's main thread. Godot starts with
+`--headless --no-header`; ETAF owns presentation and input. Game scripts keep
+stdout reserved for the bridge.
 
 ### boardgame.io
 

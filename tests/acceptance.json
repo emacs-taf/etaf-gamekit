@@ -10,6 +10,16 @@
   "support": [],
   "cases": [
     {
+      "name": "etaf-gamekit-godot-project-controls-stream-cadence",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "A project selects autonomous observation cadence without changing its simulation clock."
+    },
+    {
+      "name": "etaf-gamekit-godot-rejects-invalid-stream-rates",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Invalid Godot publication settings fail startup with an actionable error."
+    },
+    {
       "name": "etaf-gamekit-large-observations-remain-detached",
       "file": "tests/etaf-gamekit-tests.el",
       "purpose": "A large flat native tensor remains usable without consuming Lisp call depth."

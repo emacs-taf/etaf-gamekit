@@ -12,7 +12,7 @@
 
 (cl-defstruct (etaf-gamekit--session (:constructor etaf-gamekit--make-session))
   process buffer stderr timer deadline reaper presentation validator game-info (input "") (next-id 0) pending
-  (revision 0) capabilities observation error (status 'starting)
+  (revision 0) (published-at 0) capabilities observation error (status 'starting)
   (view-ref (etaf-ref nil :test #'equal)) (capabilities-ref (etaf-ref nil :test #'equal)) (status-ref (etaf-ref "Starting game…"))
   (error-ref (etaf-ref "")))
 
@@ -58,7 +58,8 @@
 
 (defun etaf-gamekit--publish (session)
   "Publish SESSION's newest accepted projection in one reactive batch."
-  (setf (etaf-gamekit--session-timer session) nil)
+  (setf (etaf-gamekit--session-timer session) nil
+        (etaf-gamekit--session-published-at session) (float-time))
   (when (and (buffer-live-p (etaf-gamekit-buffer session))
              (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
     (etaf-batch
@@ -79,8 +80,11 @@
     (cancel-timer (etaf-gamekit--session-timer session))
     (setf (etaf-gamekit--session-timer session) nil))
   (unless (etaf-gamekit--session-timer session)
-    (setf (etaf-gamekit--session-timer session)
-          (run-at-time (if immediate 0 (/ 1.0 60)) nil #'etaf-gamekit--publish session))))
+    (let* ((period (/ 1.0 60))
+           (remaining (- period (- (float-time) (etaf-gamekit--session-published-at session))))
+           (delay (if immediate 0 (min period (max 0 remaining)))))
+      (setf (etaf-gamekit--session-timer session)
+            (run-at-time delay nil #'etaf-gamekit--publish session)))))
 
 (defun etaf-gamekit--fail (session message)
   "Record MESSAGE and release SESSION's failed transport."

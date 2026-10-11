@@ -4,11 +4,15 @@
 
 ### Fixed
 
+- Streamed states no longer incur another full publication delay when the
+  previous rate window has already elapsed.
 - Large flat native observation arrays no longer exhaust Lisp evaluation depth
   while copying data for validators and views.
 
 ### Added
 
+- Godot projects can select `gamekit/observation_hz` from 1 to 60 for autonomous
+  state updates; existing projects retain the 20 Hz default.
 - OpenSpiel games support bounded undo/redo, including chance outcomes and the
   acting player's perspective. Reset accepts an explicit seed for a new deal.
 
