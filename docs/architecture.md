@@ -76,8 +76,14 @@ than being copied into either GameKit or applications.
 ## Included native adapters
 
 Godot supplies a simulation runtime. Its shared bridge owns stdin, correlation
-and changed-state publication. A game project supplies commands and observations
-while using Godot's physics, collision, navigation and simulation APIs. The
+and changed-state publication. It consumes queued commands before the node
+physics step and flushes their ordered replies in the idle phase, sharing a
+pipe write with a changed-state publication when one is due. Each reply still
+contains its own post-command snapshot;
+sharing a pipe write lets the frontend coalesce a burst without preparing
+intermediate pictures that would never be displayed. A game project supplies
+commands and observations while using Godot's physics, collision, navigation
+and simulation APIs. The
 bridge runs [headlessly](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_dedicated_servers.html);
 there is no game-rendering window or video-frame transport. GameKit does not
 contain that project's rules or UI.

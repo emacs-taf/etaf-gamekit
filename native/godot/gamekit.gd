@@ -12,6 +12,7 @@ var connected := false
 var elapsed := 0.0
 var observation_interval := 0.05
 var last_observation := ""
+var output := PackedStringArray()
 
 func _initialize() -> void:
 	var rate = ProjectSettings.get_setting("gamekit/observation_hz", 20.0)
@@ -86,10 +87,15 @@ func _emit(identifier, failure = null) -> void:
 		return
 	last_observation = serialized
 	revision += 1
-	print(JSON.stringify({"version": 1, "id": identifier, "revision": revision,
+	output.append(JSON.stringify({"version": 1, "id": identifier, "revision": revision,
 		"capabilities": game.capabilities(), "observation": observation, "error": failure}))
 
-func _process(delta: float) -> bool:
+func _flush_output() -> void:
+	if not output.is_empty():
+		print("\n".join(output))
+		output.clear()
+
+func _physics_process(_delta: float) -> bool:
 	if game == null:
 		return false
 	mutex.lock()
@@ -98,10 +104,12 @@ func _process(delta: float) -> bool:
 	mutex.unlock()
 	for request in requests:
 		if request.has("_fatal"):
+			_flush_output()
 			printerr(request._fatal)
 			quit(2)
 			return true
 		if request.has("_eof"):
+			_flush_output()
 			return true
 		var failure: String = ""
 		if request.op == "start" and not connected:
@@ -111,10 +119,16 @@ func _process(delta: float) -> bool:
 		else:
 			failure = game.command(request.op, request.args)
 		_emit(request.id, null if failure.is_empty() else failure)
+	return false
+
+func _process(delta: float) -> bool:
+	if game == null:
+		return false
 	elapsed += delta
 	if connected and elapsed >= observation_interval:
 		elapsed = fmod(elapsed, observation_interval)
 		_emit(null)
+	_flush_output()
 	return false
 
 func _finalize() -> void:

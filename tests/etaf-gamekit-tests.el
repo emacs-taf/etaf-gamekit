@@ -326,6 +326,21 @@
             (should-not (etaf-gamekit-last-error session)))
         (etaf-gamekit-test--dispose session) (delete-directory directory t)))))
 
+(ert-deftest etaf-gamekit-godot-preserves-batched-input-order ()
+  "A full outstanding native command burst acknowledges every input in order."
+  (let ((directory (etaf-gamekit-test--clock-project "60")) session)
+    (unwind-protect
+        (progn
+          (setq session (etaf-gamekit-start etaf-gamekit-test--clock :options (list :project directory)))
+          (etaf-gamekit-test--wait session)
+          (dotimes (index 8) (etaf-gamekit-action session "tag" (list :value index)))
+          (etaf-gamekit-test--wait session)
+          (let ((tags (plist-get (etaf-gamekit-observation session) :tags)))
+            (should (= (length tags) 8))
+            (should (cl-every #'= tags '(0 1 2 3 4 5 6 7))))
+          (should-not (etaf-gamekit-last-error session)))
+      (etaf-gamekit-test--dispose session) (delete-directory directory t))))
+
 (ert-deftest etaf-gamekit-godot-rejects-invalid-stream-rates ()
   "Invalid project settings fail startup and surface the actionable reason."
   (dolist (rate '("0" "61" "\"fast\""))

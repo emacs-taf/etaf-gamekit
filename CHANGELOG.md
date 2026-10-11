@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Godot applies queued commands before physics and flushes a tick's ordered
+  replies together, allowing combined controls to share presentation work.
 - Streamed states no longer incur another full publication delay when the
   previous rate window has already elapsed.
 - Large flat native observation arrays no longer exhaust Lisp evaluation depth

@@ -10,6 +10,11 @@
   "support": [],
   "cases": [
     {
+      "name": "etaf-gamekit-godot-preserves-batched-input-order",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "A full burst of native commands acknowledges every input and preserves its order."
+    },
+    {
       "name": "etaf-gamekit-godot-project-controls-stream-cadence",
       "file": "tests/etaf-gamekit-tests.el",
       "purpose": "A project selects autonomous observation cadence without changing its simulation clock."
