@@ -300,6 +300,44 @@ class RuleKernelContracts(unittest.TestCase):
         engine.request('set-player', player=1)
         self.assertTrue(engine.request('act', action=0)['observation']['terminal'])
 
+    def test_openspiel_undo_redo_restores_chance_and_survives_snapshots(self):
+        engine, initial = self.backend('openspiel', 'solitaire')
+        self.assertFalse(initial['can_undo'])
+        self.assertTrue(engine.request('undo')['error'])
+        action = next(item['id'] for item in initial['legal_actions'] if item['id'] != 0)
+        played = engine.request('act', action=action)['observation']
+        self.assertEqual(played['action_count'], 1)
+        undone = engine.request('undo')['observation']
+        expected = dict(initial, can_redo=True)
+        self.assertEqual(undone, expected)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'history.snapshot'
+            self.assertIsNone(engine.request('save', path=str(target))['error'])
+            engine.request('reset', seed=123)
+            self.assertEqual(engine.request('load', path=str(target))['observation'], expected)
+            self.assertEqual(engine.request('redo')['observation'], played)
+        engine.request('undo')
+        self.assertEqual(engine.request('act', action=action)['observation'], played)
+        self.assertTrue(engine.request('redo')['error'])
+
+    def test_openspiel_seeded_reset_and_invalid_history_are_atomic(self):
+        engine, initial = self.backend('openspiel', 'solitaire')
+        other = engine.request('reset', seed=99)['observation']
+        self.assertNotEqual(other['observation'], initial['observation'])
+        self.assertEqual(engine.request('reset', seed=42)['observation'], initial)
+        rejected = engine.request('reset', seed='not-an-integer')
+        self.assertTrue(rejected['error'])
+        self.assertEqual(rejected['observation'], initial)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'history.snapshot'
+            engine.request('save', path=str(target))
+            saved = json.loads(target.read_text())
+            saved['past'] = [{'native': 3}]
+            target.write_text(json.dumps(saved))
+            rejected = engine.request('load', path=str(target))
+            self.assertTrue(rejected['error'])
+            self.assertEqual(rejected['observation'], initial)
+
     def test_openspiel_catalog_is_discoverable_without_starting_a_game(self):
         output = subprocess.run([str(CACHE / 'openspiel/bin/python'),
                                  str(ROOT / 'native/openspiel/bridge.py'), '--list'],

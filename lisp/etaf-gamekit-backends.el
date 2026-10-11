@@ -108,7 +108,7 @@
 (etaf-gamekit-register-backend 'boardgame-io :title "boardgame.io"
  :features '(turns phases player-views replay-snapshots) :launch #'etaf-gamekit--boardgame-launch :replace t)
 (etaf-gamekit-register-backend 'openspiel :title "OpenSpiel"
- :features '(rule-catalog legal-actions chance simultaneous-actions snapshots)
+ :features '(rule-catalog legal-actions chance simultaneous-actions snapshots undo-redo)
  :launch #'etaf-gamekit--openspiel-launch :replace t)
 
 (provide 'etaf-gamekit-backends)

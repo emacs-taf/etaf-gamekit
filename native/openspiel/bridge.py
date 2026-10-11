@@ -16,6 +16,7 @@ import pyspiel
 VERSION = importlib.metadata.version('open-spiel')
 MAX_MESSAGE = 1024 * 1024
 MAX_SNAPSHOT = 8 * MAX_MESSAGE
+MAX_HISTORY = 128
 
 
 class Match:
@@ -33,6 +34,14 @@ class Match:
         self.random = random.Random(seed)
         self.state = self.game.new_initial_state()
         self.resolve_chance(self.state, self.random)
+        self.past, self.future, self.action_count = [], [], 0
+
+    def frame(self):
+        return self.state.clone(), self.random.getstate(), self.player, self.action_count
+
+    def use_frame(self, frame):
+        self.state, state, self.player, self.action_count = frame
+        self.random.setstate(state)
 
     def valid_player(self, player):
         if type(player) is not int or not 0 <= player < self.game.num_players():
@@ -57,6 +66,8 @@ class Match:
             'game': {'name': kind.short_name, 'specification': str(self.game),
                      'players': self.game.num_players(), 'dynamics': str(kind.dynamics)},
             'player': self.player, 'current_player': state.current_player(),
+            'can_undo': bool(self.past), 'can_redo': bool(self.future),
+            'action_count': self.action_count,
             'terminal': terminal, 'simultaneous': state.is_simultaneous_node(),
             'legal_actions': [{'id': action, 'label': state.action_to_string(self.player, action)} for action in legal],
             'observation': state.observation_string(self.player) if kind.provides_observation_string else None,
@@ -72,11 +83,21 @@ class Match:
             self.save(self.path(args))
         elif operation == 'load':
             self.restore(self.path(args))
+        elif operation in ('undo', 'redo'):
+            source, destination = (self.past, self.future) if operation == 'undo' else (self.future, self.past)
+            if not source:
+                raise ValueError(f'Nothing to {operation}')
+            destination.append(self.frame())
+            self.use_frame(source.pop())
         elif operation == 'reset':
+            seed = args.get('seed', self.seed)
+            if type(seed) is not int:
+                raise ValueError('Reset seed must be an integer')
             candidate = self.game.new_initial_state()
-            generator = random.Random(self.seed)
+            generator = random.Random(seed)
             self.resolve_chance(candidate, generator)
-            self.state, self.random = candidate, generator
+            self.state, self.random, self.seed = candidate, generator, seed
+            self.past, self.future, self.action_count = [], [], 0
         elif operation in ('act', 'joint-action'):
             if self.state.is_terminal():
                 raise ValueError('The game is over')
@@ -99,7 +120,11 @@ class Match:
                     raise ValueError('Illegal joint action')
                 candidate.apply_actions(actions)
             self.resolve_chance(candidate, generator)
+            self.past.append(self.frame())
+            del self.past[:-MAX_HISTORY]
+            self.future.clear()
             self.state, self.random = candidate, generator
+            self.action_count += 1
         else:
             raise ValueError('Unsupported game operation')
 
@@ -111,9 +136,14 @@ class Match:
         return Path(value).expanduser().resolve()
 
     def save(self, path):
-        value = {'schema': 'gamekit.openspiel/snapshot-1', 'engine_version': VERSION,
-                 'game': str(self.game), 'native': pyspiel.serialize_game_and_state(self.game, self.state),
-                 'player': self.player, 'seed': self.seed, 'random': self.random.getstate()}
+        def encode(frame):
+            state, rng, player, count = frame
+            return {'native': pyspiel.serialize_game_and_state(self.game, state),
+                    'random': rng, 'player': player, 'action_count': count}
+        value = {'schema': 'gamekit.openspiel/snapshot-2', 'engine_version': VERSION,
+                 'game': str(self.game), 'seed': self.seed, 'current': encode(self.frame()),
+                 'past': [encode(frame) for frame in self.past],
+                 'future': [encode(frame) for frame in self.future]}
         encoded = json.dumps(value, allow_nan=False).encode('utf-8')
         if len(encoded) > MAX_SNAPSHOT:
             raise ValueError('Snapshot exceeds 8 MiB')
@@ -133,23 +163,35 @@ class Match:
         if len(raw) > MAX_SNAPSHOT:
             raise ValueError('Snapshot exceeds 8 MiB')
         saved = json.loads(raw)
-        if not isinstance(saved, dict) or saved.get('schema') != 'gamekit.openspiel/snapshot-1' or \
+        if not isinstance(saved, dict) or saved.get('schema') != 'gamekit.openspiel/snapshot-2' or \
                 saved.get('engine_version') != VERSION or saved.get('game') != str(self.game) or \
-                not isinstance(saved.get('native'), str) or type(saved.get('seed')) is not int:
+                type(saved.get('seed')) is not int or \
+                any(not isinstance(saved.get(key), list) or len(saved[key]) > MAX_HISTORY
+                    for key in ('past', 'future')) or len(saved['past']) + len(saved['future']) > MAX_HISTORY:
             raise ValueError('Snapshot does not match this engine and game')
-        player = self.valid_player(saved.get('player'))
-        state = saved.get('random')
-        if not isinstance(state, list) or len(state) != 3 or not isinstance(state[1], list):
-            raise ValueError('Invalid saved chance sampler')
-        if state[2] is not None and (type(state[2]) not in (int, float) or not math.isfinite(state[2])):
-            raise ValueError('Invalid saved Gaussian sample')
-        generator = random.Random()
-        generator.setstate((state[0], tuple(state[1]), state[2]))
-        candidate_game, candidate_state = pyspiel.deserialize_game_and_state(saved['native'])
-        if str(candidate_game) != str(self.game) or candidate_state.is_chance_node():
-            raise ValueError('Snapshot native state does not match its game')
-        self.game, self.state, self.player = candidate_game, candidate_state, player
-        self.random, self.seed = generator, saved['seed']
+
+        def decode(frame):
+            if not isinstance(frame, dict) or not isinstance(frame.get('native'), str) or \
+                    type(frame.get('action_count')) is not int or frame['action_count'] < 0:
+                raise ValueError('Invalid saved action frame')
+            player = self.valid_player(frame.get('player'))
+            state = frame.get('random')
+            if not isinstance(state, list) or len(state) != 3 or not isinstance(state[1], list):
+                raise ValueError('Invalid saved chance sampler')
+            if state[2] is not None and (type(state[2]) not in (int, float) or not math.isfinite(state[2])):
+                raise ValueError('Invalid saved Gaussian sample')
+            generator = random.Random()
+            generator.setstate((state[0], tuple(state[1]), state[2]))
+            game, native = pyspiel.deserialize_game_and_state(frame['native'])
+            if str(game) != str(self.game) or native.is_chance_node():
+                raise ValueError('Snapshot native state does not match its game')
+            return native, generator.getstate(), player, frame['action_count']
+
+        current = decode(saved.get('current'))
+        past = [decode(frame) for frame in saved['past']]
+        future = [decode(frame) for frame in saved['future']]
+        self.use_frame(current)
+        self.past, self.future, self.seed = past, future, saved['seed']
 
 
 def main():
@@ -168,7 +210,7 @@ def main():
     match = Match(options.game, options.player, options.seed)
     revision = previous_id = 0
     connected = False
-    capabilities = ['act', 'joint-action', 'set-player', 'reset', 'save', 'load']
+    capabilities = ['act', 'joint-action', 'set-player', 'undo', 'redo', 'reset', 'save', 'load']
     while True:
         raw = sys.stdin.buffer.readline(MAX_MESSAGE + 2)
         if not raw:

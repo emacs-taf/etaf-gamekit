@@ -197,13 +197,22 @@ native facts into its own interface.
 | `act` | Integer `:action`, legal for the currently selected active player |
 | `joint-action` | `:actions` vector with one legal action per player |
 | `set-player` | Integer `:player` perspective for local play |
-| `reset` | None; reset the native state and chance seed |
+| `undo`, `redo` | None; restore the preceding/following accepted player action, chance state and perspective |
+| `reset` | Optional integer `:seed`; reset the native state, using that seed or the current seed |
 | `save`, `load` | `:path` to an opaque local snapshot |
 
+Observations also contain `can_undo`, `can_redo` and `action_count`. The adapter
+retains up to 128 player-action checkpoints. Undo includes resolved chance and
+the acting player's perspective; changing perspective alone is not a turn.
+A new action after undo discards redo history. Reset clears both histories;
+a different seed starts a new deal for stochastic games. Rejected operations
+preserve the state, sampler and histories.
+
 Snapshots use OpenSpiel's native game/state serialization and preserve the
-adapter's chance RNG. Loading validates a candidate before changing the running
-instance. The maintained kernel scenarios cover chance and sequential play with
-Kuhn poker, and simultaneous play with the rock-paper-scissors matrix game.
+adapter's chance RNG and undo/redo histories. Loading validates every candidate
+checkpoint before changing the running instance. The maintained kernel scenarios
+cover chance, sequential play and saved undo/redo with poker and solitaire,
+and simultaneous play with the rock-paper-scissors matrix game.
 
 ## Save, recover and close
 
