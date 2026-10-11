@@ -16,11 +16,22 @@
   (with-current-buffer (etaf-gamekit-buffer session)
     (buffer-substring-no-properties (point-min) (point-max))))
 
+(etaf-define-component etaf-gamekit-benchmark--grid-view (&key session)
+  :bindings ((rows (etaf-computed (lambda () (etaf-gamekit-view session :rows)) :test #'equal))
+             (status (etaf-computed (lambda () (etaf-gamekit-view session :status)) :test #'equal)))
+  :view
+  (column
+    (etaf-label :text (or (etaf-value status) "Starting"))
+    (etaf-text-grid :columns 80 :rows 24
+      :row-text (lambda (row) (or (nth row (etaf-value rows)) "")))))
+
 (defun etaf-gamekit-benchmark--grid (mode density &optional fps)
   "Create a DENSITY character fixture for MODE, optionally streaming at FPS."
   (let* ((session (etaf-gamekit-start
                    (list "python3" (expand-file-name "grid-source.py" etaf-gamekit-benchmark--directory)
-                         "--density" (number-to-string density))))
+                         "--density" (number-to-string density))
+                   :view (lambda (game)
+                           (etaf-view (etaf-gamekit-benchmark--grid-view :session game)))))
          (runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
          (expected 0) (seen nil) (accepted nil) (started nil) (before 0) snapshot)
     (cl-labels
@@ -82,69 +93,56 @@
          :description (format "Next displayed frame at %d Hz; 80x24; %d%% cells change" fps amount)
          :setup (lambda (mode) (etaf-gamekit-benchmark--grid mode amount fps)))))))
 
-(defun etaf-gamekit-benchmark--chess (mode engine)
-  "Create a real chess action fixture for MODE; ENGINE requests Stockfish."
-  (let* ((session (etaf-gamekit-open-chess))
+(defun etaf-gamekit-benchmark--salvage (mode operation)
+  "Create a complete game surface for MODE and measured OPERATION."
+  (let* ((session (etaf-gamekit-open-demo))
          (runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
-         expected)
-    (cl-labels ((settled ()
-                 (and (eq (etaf-gamekit-status session) 'ready)
-                      (equal (length (plist-get (etaf-gamekit-observation session) :moves)) expected)
-                      (string-match-p (format "%d plies played" expected)
-                                      (etaf-gamekit-benchmark--text session)))))
-      (setq expected 0)
-      (list :buffer (etaf-gamekit-buffer session)
-            :ready (lambda () (when (eq mode 'batch) (etaf-runtime-refit runtime 1200 45)) (settled))
-            :invoke (lambda (index)
-                      (setq expected (if engine (1+ index) (if (cl-evenp index) 1 0)))
-                      (cond (engine (etaf-dispatch-event runtime 'game-engine 'press))
-                            ((cl-evenp index) (etaf-gamekit-action session "move" '(:move "e2e4")))
-                            (t (etaf-dispatch-event runtime 'game-undo 'press))))
-            :settled #'settled
-            :verify (lambda () (or (etaf-gamekit-last-error session) t))
-            :outcome (lambda () (list :plies expected :last_move
-                                      (plist-get (etaf-gamekit-observation session) :last_move)))
-            :cleanup (lambda () (etaf-gamekit-close session)
-                       (kill-buffer (etaf-gamekit-buffer session)))))))
+         (expected nil) (target nil))
+    (list
+     :buffer (etaf-gamekit-buffer session)
+     :ready (lambda ()
+              (if (eq mode 'batch) (etaf-runtime-refit runtime 1200 46)
+                (etaf-refit runtime (selected-window)))
+              (and (eq (etaf-gamekit-status session) 'ready)
+                   (etaf-host-ref-size runtime 'salvage-map)))
+     :invoke
+     (lambda (index)
+       (pcase operation
+         ('select
+          (setq expected (if (cl-evenp index) "Power core 1" "Power core 2"))
+          (etaf-dispatch-event runtime (if (cl-evenp index) 'salvage-tile-3-12 'salvage-tile-4-26) 'press))
+         ('route
+          (setq expected (if (cl-evenp index) '(6 4) '(6 5))
+                target (if (cl-evenp index) 'salvage-tile-4-6 'salvage-tile-5-6))
+          (etaf-dispatch-event runtime target 'press))
+         ('resize
+          (setq expected (if (cl-evenp index) 900 1200))
+          (etaf-runtime-refit runtime expected 46))))
+     :settled
+     (lambda ()
+       (pcase operation
+         ('select (string-match-p expected (etaf-gamekit-benchmark--text session)))
+         ('route
+          (and (eq (etaf-gamekit-status session) 'ready)
+               (equal (car (last (plist-get (plist-get (etaf-gamekit-observation session) :world) :route))) expected)
+               (equal (plist-get (etaf-runtime-host-props-for runtime target) :color) "#73BDEB")))
+         ('resize (= (car (etaf-runtime-viewport runtime)) expected))))
+     :verify (lambda () (or (etaf-gamekit-last-error session) t))
+     :outcome (lambda () (list :operation (symbol-name operation)
+                                  :map (let ((size (etaf-host-ref-size runtime 'salvage-map)))
+                                         (vector (car size) (cdr size)))))
+     :cleanup (lambda () (etaf-gamekit-close session)
+                (kill-buffer (etaf-gamekit-buffer session))))))
 
-(dolist (engine '(nil t))
-  (let ((computer engine))
+(dolist (case '((select 16 "Select an object and publish target intelligence")
+                (route 50 "Deck click through Godot pathfinding to painted route")
+                (resize 50 "Refit a fixed-cell game between 900 and 1200 pixels")))
+  (let ((operation (car case)))
     (taf-benchmark-register
-     (if computer "etaf-gamekit.chess.engine" "etaf-gamekit.chess.move")
-     :version 1 :modes '(batch gui) :isolation 'series :impact 'subtree
-     :budget-ms (if computer 250 100)
-     :description (if computer "Stockfish reply and displayed board" "Legal move or undo and displayed board")
-     :setup (lambda (mode) (etaf-gamekit-benchmark--chess mode computer)))))
-
-(taf-benchmark-register
- "etaf-gamekit.story.command" :version 1 :modes '(batch gui) :isolation 'series
- :impact 'subtree :budget-ms 100 :description "Glulxe command to visible transcript and status"
- :setup
- (lambda (mode)
-   (let* ((session (etaf-gamekit-open-story
-                    (expand-file-name "last-beacon.ulx" etaf-gamekit-engine-directory)))
-          (runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
-          (generation 0))
-     (cl-labels ((settled ()
-                   (let* ((view (etaf-gamekit-observation session))
-                          (line (car (plist-get (car (plist-get view :windows)) :lines))))
-                     (and (eq (etaf-gamekit-status session) 'ready)
-                          (> (or (plist-get view :generation) 0) generation)
-                          line (string-match-p (regexp-quote (string-trim line))
-                                               (etaf-gamekit-benchmark--text session))))))
-       (list :buffer (etaf-gamekit-buffer session)
-             :ready (lambda ()
-                      (if (eq mode 'batch) (etaf-runtime-refit runtime 1200 45)
-                        (etaf-refit runtime (selected-window)))
-                      (settled))
-             :invoke (lambda (_index)
-                       (setq generation (plist-get (etaf-gamekit-observation session) :generation))
-                       (etaf-gamekit-action session "line" '(:value "look")))
-             :settled #'settled
-             :verify (lambda () (or (etaf-gamekit-last-error session) t))
-             :outcome (lambda () (list :generation (plist-get (etaf-gamekit-observation session) :generation)))
-             :cleanup (lambda () (etaf-gamekit-close session)
-                        (kill-buffer (etaf-gamekit-buffer session))))))))
+     (format "etaf-gamekit.salvage.%s" operation)
+     :version 2 :modes '(batch gui) :isolation 'series :impact 'subtree
+     :budget-ms (cadr case) :description (caddr case)
+     :setup (lambda (mode) (etaf-gamekit-benchmark--salvage mode operation)))))
 
 (provide 'etaf-gamekit-performance-scenarios)
 ;;; performance-scenarios.el ends here

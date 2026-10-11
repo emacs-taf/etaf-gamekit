@@ -1,35 +1,40 @@
 # etaf-gamekit
 
-An MVP for running mature game engines in native Emacs buffers through ETAF.
-Glulxe/RemGlk executes interactive fiction; python-chess owns chess rules and
-Stockfish supplies computer moves. The frontend handles presentation and input.
+Game kernels with rich, native ETAF frontends. GameKit supplies asynchronous
+sessions, a versioned command/observation protocol and an included headless Godot
+bridge. Applications compose their interface from ETAF and etaf-ui; the game
+process owns simulation, rules and saved state.
 
-Requires Emacs 29.1+, sibling ETAF and etaf-ui checkouts, Python 3.9+, a C compiler
-and Make. Engine sources are pinned and downloaded into a user cache; they are
-not vendored into this package. macOS can install the pinned Stockfish binary.
-On other Unix systems, install Stockfish first or pass its path to the installer.
+The maintained game, **Salvage Station**, has a live station map, navigation,
+security drones, skills, cargo, target inspection and save/restore. Its frontend
+reflows panels around a fixed-size map at different window widths and heights. Godot supplies physics and pathfinding;
+it opens no game-rendering window.
+
+Requires Emacs 29.1+, sibling ETAF/etaf-ui checkouts and Godot 4.7+.
+Python 3.9+ installs the pinned Godot 4.7.2 binary on macOS or Linux x86-64/arm64:
 
 ```sh
-python3 scripts/setup-engines.py
-# Or: python3 scripts/setup-engines.py --stockfish /path/to/stockfish
+make engine
+# Or: python3 scripts/setup-engine.py --godot /path/to/godot
 ```
 
-Add the repository roots of etaf-gamekit and its dependencies to `load-path`:
+Add the repository roots of this package and its dependencies to `load-path`:
 
 ```elisp
 (require 'etaf-gamekit)
-;; M-x etaf-gamekit-open-demo: play The Last Beacon.
-;; M-x etaf-gamekit-open-chess: select pieces or type a UCI move such as e2e4.
+(etaf-gamekit-open-demo)
 ```
 
-Chess includes legal-move highlights, promotion choices, a Stockfish move action,
-undo, restart and snapshots. Story sessions support Glk text-buffer/text-grid
-windows and line/character input. Each game owns a separate asynchronous process;
-closing its buffer releases the session. Unsupported Glk capabilities are
-reported explicitly. This release does not provide multiplayer, physics, a
-universal game-state model or a claim of compatibility with every Glk story.
+Press **P** to launch or pause. Click empty deck to navigate; click an object to
+inspect it. **W A S D** steer, **1** fires an EMP and **2** activates a shield.
+Recover three cores, then return to the extraction dock. Save and Load preserve
+an expedition; restored games start paused.
 
-See [the manual](docs/manual.md) for play, saving, extension and recovery;
-[the package entry](etaf-gamekit.el) is the supported API inventory.
-[Architecture](docs/architecture.md) describes the implemented ownership boundary.
-Run `make engines`, then `make check` for the public integration suite.
+The core accepts application-defined observation objects rather than a fixed
+set of game genres. Other runtimes can implement the same protocol. Multiplayer,
+asset downloading and audio mixing are not provided by this MVP.
+
+See [the manual](docs/manual.md) for integration, saving and recovery,
+[the package entry](etaf-gamekit.el) for supported APIs, and
+[architecture](docs/architecture.md) for ownership and backend selection.
+Run `make check` after installing the engine.

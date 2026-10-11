@@ -10,29 +10,29 @@
   "support": [],
   "cases": [
     {
-      "name": "etaf-gamekit-story-native-input-submits-a-command",
+      "name": "etaf-gamekit-salvage-controls-change-the-live-world",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "Native field typing and Return reach the engine and update the transcript."
+      "purpose": "Tile selection, target routing and skill controls update a real game."
     },
     {
-      "name": "etaf-gamekit-observations-preserve-an-action-rejection",
+      "name": "etaf-gamekit-salvage-native-keys-retain-rapid-input",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "An unsolicited display frame cannot erase the last action's rejection."
+      "purpose": "Native directional keys reach the backend in order while paused."
     },
     {
-      "name": "etaf-gamekit-chess-displays-moves-rejections-and-engine-replies",
+      "name": "etaf-gamekit-salvage-resizes-with-a-readable-minimum",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "Catalog interactions change a real engine position and display rejection."
+      "purpose": "Reflow preserves map metrics and panel state; tiny viewports clip the canvas."
     },
     {
-      "name": "etaf-gamekit-story-input-save-and-restore-use-native-state",
+      "name": "etaf-gamekit-salvage-snapshot-restores-through-the-session",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "A story snapshot restores its room and held object through the public API."
+      "purpose": "A real saved expedition loads paused and remains valid for its frontend."
     },
     {
-      "name": "etaf-gamekit-transport-handles-fragments-and-detaches-observations",
+      "name": "etaf-gamekit-transport-fragments-detached-values-and-bounded-input",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "Partial JSON waits for completion; callers cannot mutate accepted views."
+      "purpose": "Fragments decode safely, reads detach ownership and eight inputs retain order."
     },
     {
       "name": "etaf-gamekit-transport-coalesces-to-the-newest-visible-frame",
@@ -42,12 +42,22 @@
     {
       "name": "etaf-gamekit-transport-rejects-stale-invalid-and-dead-peers",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "Bad protocol, a timeout and process death become inspectable failures."
+      "purpose": "Invalid schemas, stale replies, oversized messages and dead peers fail clearly."
     },
     {
-      "name": "etaf-gamekit-close-and-buffer-death-release-the-child",
+      "name": "etaf-gamekit-schema-validator-errors-fail-the-session",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "Closing and killing a buffer stop its owned child, idempotently."
+      "purpose": "A supplied validator failure is reported with connection state and context."
+    },
+    {
+      "name": "etaf-gamekit-close-unmount-and-buffer-death-release-the-child",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Explicit close, unmount and buffer death release the child idempotently."
+    },
+    {
+      "name": "etaf-gamekit-observations-preserve-an-action-rejection",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "An unsolicited display frame cannot erase the last action's rejection."
     }
   ]
 }

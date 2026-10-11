@@ -8,18 +8,21 @@
 (require 'json)
 (require 'etaf-ui)
 (defvar etaf-gamekit--directory)
-(defvar etaf-gamekit-engine-directory)
+(defvar etaf-gamekit-godot-program)
 (defvar etaf-gamekit-request-timeout)
 (declare-function etaf-gamekit--mount "etaf-gamekit-view" (session))
+(declare-function etaf-gamekit--salvage-view "etaf-gamekit-salvage" (session))
+(declare-function etaf-gamekit--salvage-valid-p "etaf-gamekit-salvage" (view))
 
 (cl-defstruct (etaf-gamekit--session (:constructor etaf-gamekit--make-session))
-  process buffer stderr timer deadline (input "") (next-id 0) pending
+  process buffer stderr timer deadline reaper presentation validator (input "") (next-id 0) pending
   (revision 0) capabilities observation error (status 'starting)
-  (view-ref (etaf-ref nil)) (capabilities-ref (etaf-ref nil)) (status-ref (etaf-ref "Starting engine…"))
+  (view-ref (etaf-ref nil :test #'equal)) (capabilities-ref (etaf-ref nil :test #'equal)) (status-ref (etaf-ref "Starting engine…"))
   (error-ref (etaf-ref "")))
 
 (defun etaf-gamekit-status (session)
   "Return SESSION's current connection state."
+  (etaf-value (etaf-gamekit--session-status-ref session))
   (etaf-gamekit--session-status session))
 
 (defun etaf-gamekit-buffer (session)
@@ -28,15 +31,28 @@
 
 (defun etaf-gamekit-last-error (session)
   "Return SESSION's latest rejection or transport error."
+  (etaf-value (etaf-gamekit--session-error-ref session))
   (etaf-gamekit--session-error session))
 
+(defun etaf-gamekit--copy (value)
+  "Detach JSON VALUE from session ownership."
+  (cond ((stringp value) (copy-sequence value))
+        ((consp value) (cons (etaf-gamekit--copy (car value))
+                            (etaf-gamekit--copy (cdr value))))
+        (t value)))
+
 (defun etaf-gamekit-observation (session)
-  "Return a detached copy of SESSION's latest backend view."
-  (cl-labels ((clone (value)
-                (cond ((stringp value) (copy-sequence value))
-                      ((consp value) (cons (clone (car value)) (clone (cdr value))))
-                      (t value))))
-    (clone (etaf-gamekit--session-observation session))))
+  "Return a detached copy of SESSION's latest accepted backend observation."
+  (etaf-gamekit--copy (etaf-gamekit--session-observation session)))
+
+(defun etaf-gamekit-view (session &optional field)
+  "Read SESSION's coalesced display observation, reactively; optionally FIELD."
+  (let ((view (etaf-value (etaf-gamekit--session-view-ref session))))
+    (etaf-gamekit--copy (if field (plist-get view field) view))))
+
+(defun etaf-gamekit-capabilities (session)
+  "Return a detached list of SESSION's advertised actions, reactively."
+  (etaf-gamekit--copy (etaf-value (etaf-gamekit--session-capabilities-ref session))))
 
 (defun etaf-gamekit--publish (session)
   "Publish SESSION's newest accepted projection in one reactive batch."
@@ -55,11 +71,14 @@
             (etaf-value (etaf-gamekit--session-capabilities-ref session))
             (etaf-gamekit--session-capabilities session)))))
 
-(defun etaf-gamekit--schedule (session)
-  "Coalesce SESSION's observations into at most sixty displays per second."
+(defun etaf-gamekit--schedule (session &optional immediate)
+  "Coalesce streamed observations; publish acknowledged input promptly."
+  (when (and immediate (etaf-gamekit--session-timer session))
+    (cancel-timer (etaf-gamekit--session-timer session))
+    (setf (etaf-gamekit--session-timer session) nil))
   (unless (etaf-gamekit--session-timer session)
     (setf (etaf-gamekit--session-timer session)
-          (run-at-time (/ 1.0 60) nil #'etaf-gamekit--publish session))))
+          (run-at-time (if immediate 0 (/ 1.0 60)) nil #'etaf-gamekit--publish session))))
 
 (defun etaf-gamekit--fail (session message)
   "Record MESSAGE and release SESSION's failed transport."
@@ -69,93 +88,81 @@
     (setf (etaf-gamekit--session-status session) 'failed
           (etaf-gamekit--session-error session) message
           (etaf-gamekit--session-pending session) nil)
-    (when-let* ((process (etaf-gamekit--session-process session)))
-      (when (process-live-p process) (signal-process process 'SIGTERM)))
+    (etaf-gamekit--terminate session)
     (etaf-gamekit--schedule session)))
 
-(defun etaf-gamekit--object-p (value)
-  "Whether decoded VALUE is a JSON object represented as a keyword plist."
-  (and (proper-list-p value) (zerop (% (length value) 2))
-       (cl-loop for (key _value) on value by #'cddr always (keywordp key))))
+(defun etaf-gamekit--terminate (session)
+  "Close SESSION's stdin, then reap a child that fails to exit promptly."
+  (when-let* ((process (etaf-gamekit--session-process session)))
+    (when (process-live-p process)
+      (process-send-eof process)
+      (unless (etaf-gamekit--session-reaper session)
+        (setf (etaf-gamekit--session-reaper session)
+              (run-at-time 0.75 nil
+                           (lambda ()
+                             (setf (etaf-gamekit--session-reaper session) nil)
+                             (when (process-live-p process) (delete-process process)))))))))
 
-(defun etaf-gamekit--view-valid-p (view)
-  "Whether VIEW can be safely consumed by the declared presentation."
-  (and (etaf-gamekit--object-p view) (stringp (plist-get view :title))
-       (stringp (plist-get view :status))
-       (pcase (plist-get view :kind)
-         ("chess"
-          (and (proper-list-p (plist-get view :board))
-               (= (length (plist-get view :board)) 8)
-               (cl-every (lambda (row)
-                           (and (stringp row)
-                                (string-match-p "\\`[prnbqkPRNBQK.]\\(?: [prnbqkPRNBQK.]\\)\\{7\\}\\'" row)))
-                         (plist-get view :board))
-               (proper-list-p (plist-get view :legal))
-               (proper-list-p (plist-get view :moves))
-               (or (null (plist-get view :last_move))
-                   (stringp (plist-get view :last_move)))
-               (cl-every (lambda (move)
-                           (and (stringp move)
-                                (string-match-p "\\`[a-h][1-8][a-h][1-8][qrbn]?\\'" move)))
-                         (append (plist-get view :legal) (plist-get view :moves)))))
-         ("grid"
-          (let ((columns (plist-get view :columns)) (rows (plist-get view :rows)))
-            (and (integerp columns) (<= 1 columns 320) (proper-list-p rows)
-                 (<= 1 (length rows) 120)
-                 (cl-every (lambda (row) (and (stringp row)
-                                              (not (string-match-p "[\n\r\t]" row))
-                                              (<= (string-width row) columns))) rows))))
-         ("story"
-          (and (proper-list-p (plist-get view :windows))
-               (integerp (plist-get view :generation))
-               (proper-list-p (plist-get view :input))
-               (cl-every (lambda (input)
-                           (and (etaf-gamekit--object-p input)
-                                (integerp (plist-get input :id))
-                                (member (plist-get input :type) '("line" "char"))))
-                         (plist-get view :input))
-               (cl-every
-                (lambda (window)
-                  (and (etaf-gamekit--object-p window) (integerp (plist-get window :id))
-                       (pcase (plist-get window :type)
-                         ("buffer" (stringp (plist-get window :text)))
-                         ("grid" (and (proper-list-p (plist-get window :lines))
-                                      (integerp (plist-get window :gridheight))
-                                      (= (plist-get window :gridheight)
-                                         (length (plist-get window :lines)))
-                                      (etaf-gamekit--view-valid-p
-                                       (list :kind "grid" :title "" :status ""
-                                             :columns (plist-get window :gridwidth)
-                                             :rows (plist-get window :lines)))))
-                         (_ nil))))
-                (plist-get view :windows))))
-         (_ nil))))
+(defun etaf-gamekit--decode (value)
+  "Convert parsed JSON VALUE to detached keyword plists and lists."
+  (cond ((hash-table-p value)
+         (let (result)
+           (maphash (lambda (key item)
+                      (setq result (nconc result
+                                          (list (intern (concat ":" key))
+                                                (etaf-gamekit--decode item))))) value)
+           result))
+        ((vectorp value) (mapcar #'etaf-gamekit--decode value))
+        (t value)))
+
+(defun etaf-gamekit--deadline (session)
+  "Arm SESSION's deadline for its oldest outstanding request."
+  (when-let* ((timer (etaf-gamekit--session-deadline session)))
+    (cancel-timer timer))
+  (setf (etaf-gamekit--session-deadline session) nil)
+  (when-let* ((pending (car (etaf-gamekit--session-pending session))))
+    (setf (etaf-gamekit--session-deadline session)
+          (run-at-time (max 0 (- (cdr pending) (float-time))) nil
+                       (lambda ()
+                         (etaf-gamekit--fail session "Engine response timed out"))))))
 
 (defun etaf-gamekit--accept (session message)
   "Validate and accept one decoded adapter MESSAGE for SESSION."
-  (unless (etaf-gamekit--object-p message)
+  (unless (hash-table-p message)
     (signal 'etaf-gamekit-error '("Adapter response must be a JSON object")))
-  (let ((id (plist-get message :id)) (revision (plist-get message :revision))
-        (view (plist-get message :view)) (capabilities (plist-get message :capabilities))
-        (failure (plist-get message :error)))
-    (unless (and (equal (plist-get message :version) 1)
+  (let* ((id (gethash "id" message)) (revision (gethash "revision" message))
+         (raw (gethash "observation" message))
+         (observation (etaf-gamekit--decode raw))
+         (capabilities (gethash "capabilities" message))
+         (failure (gethash "error" message))
+         (validator (etaf-gamekit--session-validator session)))
+    (unless (and (cl-every (lambda (key)
+                             (not (eq (gethash key message 'absent) 'absent)))
+                           '("version" "id" "revision" "capabilities" "observation" "error"))
+                 (equal (gethash "version" message) 1)
                  (integerp revision) (> revision (etaf-gamekit--session-revision session))
-                 (or (null id) (equal id (etaf-gamekit--session-pending session)))
-                 (etaf-gamekit--view-valid-p view)
-                 (proper-list-p capabilities) (cl-every #'stringp capabilities)
-                 (or (null failure) (stringp failure)))
+                 (or (null id) (equal id (caar (etaf-gamekit--session-pending session))))
+                 (hash-table-p raw)
+                 (or (null validator)
+                     (eq t (condition-case problem
+                               (funcall validator (etaf-gamekit--copy observation))
+                             (error (signal 'etaf-gamekit-error
+                                            (list (concat "Observation validator failed: "
+                                                          (error-message-string problem))))))))
+                 (vectorp capabilities) (cl-every #'stringp capabilities)
+                 (or (null failure)
+                     (and id (stringp failure) (not (string-empty-p failure)))))
       (signal 'etaf-gamekit-error '("Malformed, stale or uncorrelated adapter response")))
     (setf (etaf-gamekit--session-revision session) revision
-          (etaf-gamekit--session-observation session) view
-          (etaf-gamekit--session-capabilities session) capabilities)
-    (when (or id failure)
-      (setf (etaf-gamekit--session-error session) failure))
+          (etaf-gamekit--session-observation session) observation
+          (etaf-gamekit--session-capabilities session) (append capabilities nil))
     (when id
-      (when-let* ((deadline (etaf-gamekit--session-deadline session)))
-        (cancel-timer deadline) (setf (etaf-gamekit--session-deadline session) nil))
-      (setf (etaf-gamekit--session-pending session) nil
-            (etaf-gamekit--session-status session) 'ready))
-    (etaf-gamekit--schedule session)))
+      (setf (etaf-gamekit--session-error session) failure
+            (etaf-gamekit--session-pending session) (cdr (etaf-gamekit--session-pending session))
+            (etaf-gamekit--session-status session)
+            (if (etaf-gamekit--session-pending session) 'busy 'ready))
+      (etaf-gamekit--deadline session))
+    (etaf-gamekit--schedule session id)))
 
 (defun etaf-gamekit--filter (session chunk)
   "Decode bounded JSON-lines from adapter CHUNK for SESSION."
@@ -169,7 +176,7 @@
                 (signal 'etaf-gamekit-error '("Adapter message exceeds 1 MiB")))
               (unless (string-empty-p line)
                 (etaf-gamekit--accept
-                 session (json-parse-string line :object-type 'plist :array-type 'list
+                 session (json-parse-string line :object-type 'hash-table :array-type 'array
                                             :null-object nil :false-object :false)))))
           (when (> (string-bytes pending) (* 1024 1024))
             (signal 'etaf-gamekit-error '("Unterminated adapter message exceeds 1 MiB")))
@@ -182,13 +189,17 @@
   (let* ((id (1+ (etaf-gamekit--session-next-id session)))
          (encoded (condition-case failure
                       (concat (json-serialize
-                               (list :id id :op operation
+                               (list :version 1 :id id :op operation
                                      :args (or arguments (make-hash-table)))
                                :false-object :false) "\n")
                     (error (signal 'etaf-gamekit-error
                                    (list (error-message-string failure)))))))
+    (when (> (1- (string-bytes encoded)) (* 1024 1024))
+      (signal 'etaf-gamekit-error '("Request exceeds 1 MiB")))
     (setf (etaf-gamekit--session-next-id session) id
-          (etaf-gamekit--session-pending session) id)
+          (etaf-gamekit--session-pending session)
+          (append (etaf-gamekit--session-pending session)
+                  (list (cons id (+ (float-time) etaf-gamekit-request-timeout)))))
     (unless (eq (etaf-gamekit-status session) 'starting)
       (setf (etaf-gamekit--session-status session) 'busy))
     (condition-case failure
@@ -196,21 +207,18 @@
       (error
        (etaf-gamekit--fail session (error-message-string failure))
        (signal 'etaf-gamekit-error (list (error-message-string failure)))))
-    (setf (etaf-gamekit--session-deadline session)
-          (run-at-time etaf-gamekit-request-timeout nil
-                       (lambda ()
-                         (when (equal id (etaf-gamekit--session-pending session))
-                           (etaf-gamekit--fail session "Engine response timed out")))))
+    (etaf-gamekit--deadline session)
     (etaf-gamekit--schedule session)
     id))
 
 (defun etaf-gamekit-action (session operation &optional arguments)
   "Send SESSION an advertised OPERATION with keyword-plist ARGUMENTS."
-  (unless (and (eq (etaf-gamekit-status session) 'ready)
+  (unless (and (memq (etaf-gamekit-status session) '(ready busy))
+               (< (length (etaf-gamekit--session-pending session)) 8)
                (member operation (etaf-gamekit--session-capabilities session))
                (proper-list-p arguments) (zerop (% (length arguments) 2))
                (cl-loop for (key _value) on arguments by #'cddr always (keywordp key)))
-    (signal 'etaf-gamekit-error '("Action needs a ready session, an advertised operation and keyword arguments")))
+    (signal 'etaf-gamekit-error '("Action needs a live session with queue capacity, an advertised operation and keyword arguments")))
   (etaf-gamekit--send session operation arguments))
 
 (defun etaf-gamekit-close (session)
@@ -222,8 +230,7 @@
           (etaf-gamekit--session-pending session) nil)
     (when-let* ((timer (etaf-gamekit--session-timer session)))
       (cancel-timer timer) (setf (etaf-gamekit--session-timer session) nil))
-    (when-let* ((process (etaf-gamekit--session-process session)))
-      (when (process-live-p process) (signal-process process 'SIGTERM)))
+    (etaf-gamekit--terminate session)
     (when (buffer-live-p (etaf-gamekit--session-stderr session))
       (kill-buffer (etaf-gamekit--session-stderr session)))
     (when (buffer-live-p (etaf-gamekit-buffer session))
@@ -231,19 +238,22 @@
         (etaf-unmount runtime))))
   nil)
 
-(defun etaf-gamekit-start (command &optional buffer-or-name)
-  "Start adapter COMMAND, mount BUFFER-OR-NAME and return its opaque session."
+(cl-defun etaf-gamekit-start (command &key buffer view validate)
+  "Start adapter COMMAND and mount BUFFER with VIEW and optional VALIDATE."
   (unless (and (numberp etaf-gamekit-request-timeout) (> etaf-gamekit-request-timeout 0)
-               (consp command) (proper-list-p command) (cl-every #'stringp command))
+               (consp command) (proper-list-p command) (cl-every #'stringp command)
+               (or (null view) (functionp view))
+               (or (null validate) (functionp validate)))
     (signal 'etaf-gamekit-error '("Command must be a nonempty program/argument list")))
-  (let* ((buffer (if buffer-or-name (get-buffer-create buffer-or-name)
+  (let* ((buffer (if buffer (get-buffer-create buffer)
                    (generate-new-buffer "*ETAF Game*")))
-         (session (etaf-gamekit--make-session :buffer buffer)))
+         (session (etaf-gamekit--make-session :buffer buffer :presentation view :validator validate)))
     (unless (and (zerop (buffer-size buffer)) (not (etaf-runtime-for-buffer buffer)))
       (signal 'etaf-gamekit-error '("The game buffer must be empty and unmounted")))
     (condition-case failure
         (progn
           (setf (etaf-gamekit--session-stderr session) (generate-new-buffer " *Game engine stderr*"))
+          (with-current-buffer buffer (setq-local truncate-lines t))
           (etaf-gamekit--mount session)
           (with-current-buffer buffer
             (add-hook 'kill-buffer-hook (lambda () (etaf-gamekit-close session)) nil t))
@@ -255,6 +265,10 @@
                  :filter (lambda (_process text) (etaf-gamekit--filter session text))
                  :sentinel
                  (lambda (process event)
+                   (when (memq (process-status process) '(exit signal failed))
+                     (when-let* ((reaper (etaf-gamekit--session-reaper session)))
+                       (cancel-timer reaper)
+                       (setf (etaf-gamekit--session-reaper session) nil)))
                    (when (and (memq (process-status process) '(exit signal failed))
                               (not (memq (etaf-gamekit-status session) '(closed failed))))
                      (etaf-gamekit--fail
@@ -271,50 +285,32 @@
        (etaf-gamekit-close session)
        (signal (car failure) (cdr failure))))))
 
-(defun etaf-gamekit--program (relative fallback)
-  "Find cached RELATIVE or executable FALLBACK, with an actionable error."
-  (let ((path (expand-file-name relative etaf-gamekit-engine-directory)))
-    (or (and (file-executable-p path) path) (and fallback (executable-find fallback))
-        (signal 'etaf-gamekit-error
-                (list (format "Missing %s; run python3 scripts/setup-engines.py" relative))))))
-
-(defun etaf-gamekit--command (adapter)
-  "Return the installed runner prefix for ADAPTER."
-  (list (etaf-gamekit--program "python/bin/python3" "python3")
-        (expand-file-name "scripts/run-engine.py" etaf-gamekit--directory)
-        "--adapter" adapter))
+(defun etaf-gamekit--godot ()
+  "Resolve the configured Godot program without changing the user's PATH."
+  (or (and (file-executable-p etaf-gamekit-godot-program) etaf-gamekit-godot-program)
+      (executable-find etaf-gamekit-godot-program)
+      (signal 'etaf-gamekit-error '("Godot is missing; run make engine or set etaf-gamekit-godot-program"))))
 
 (defun etaf-gamekit--display (session)
-  "Show SESSION and fit a buffer that was mounted before it had a window."
+  "Show SESSION and fit its newly displayed buffer."
   (pop-to-buffer (etaf-gamekit-buffer session))
   (etaf-refit (etaf-runtime-for-buffer (etaf-gamekit-buffer session)) (selected-window)))
 
-(defun etaf-gamekit-open-chess (&optional fen buffer-or-name)
-  "Open a chess session at FEN in BUFFER-OR-NAME."
-  (interactive)
-  (let ((session (etaf-gamekit-start
-                  (append (etaf-gamekit--command "chess")
-                          (list "--stockfish" (etaf-gamekit--program "bin/stockfish" "stockfish"))
-                          (when fen (list "--fen" fen))) buffer-or-name)))
-    (when (called-interactively-p 'interactive) (etaf-gamekit--display session))
-    session))
-
-(defun etaf-gamekit-open-story (story &optional buffer-or-name)
-  "Open a Glulx STORY session in BUFFER-OR-NAME."
-  (interactive "fGlulx story: ")
-  (unless (file-readable-p story) (signal 'etaf-gamekit-error '("Story file is unreadable")))
-  (let ((session (etaf-gamekit-start
-                  (append (etaf-gamekit--command "glulx")
-                          (list "--glulxe" (etaf-gamekit--program "bin/glulxe" "glulxe")
-                                "--story" (expand-file-name story))) buffer-or-name)))
-    (when (called-interactively-p 'interactive) (etaf-gamekit--display session))
-    session))
+(cl-defun etaf-gamekit-open-godot (project &key buffer view validate)
+  "Run Godot PROJECT through the shared bridge and mount its VIEW."
+  (unless (file-readable-p (expand-file-name "project.godot" project))
+    (signal 'etaf-gamekit-error '("PROJECT must contain project.godot")))
+  (etaf-gamekit-start
+   (list (etaf-gamekit--godot) "--headless" "--no-header" "--path" (expand-file-name project)
+         "--script" (expand-file-name "native/godot/gamekit.gd" etaf-gamekit--directory))
+   :buffer buffer :view view :validate validate))
 
 (defun etaf-gamekit-open-demo ()
-  "Open the installed Last Beacon example and return its session."
+  "Play Salvage Station with a Godot backend and an ETAF interface."
   (interactive)
-  (let ((session (etaf-gamekit-open-story
-                  (expand-file-name "last-beacon.ulx" etaf-gamekit-engine-directory))))
+  (let ((session (etaf-gamekit-open-godot
+                  (expand-file-name "examples/salvage" etaf-gamekit--directory)
+                  :view #'etaf-gamekit--salvage-view :validate #'etaf-gamekit--salvage-valid-p)))
     (etaf-gamekit--display session)
     session))
 

@@ -25,7 +25,7 @@ def main():
                                       for r in range(0, len(cells), 80)],
                 'frame': frame, 'dirty': dirty}
         print(json.dumps({'version': 1, 'id': identifier, 'revision': revision,
-                          'capabilities': ['step', 'play', 'pause'], 'view': view,
+                          'capabilities': ['step', 'play', 'pause'], 'observation': view,
                           'error': error}), flush=True)
 
     def advance():

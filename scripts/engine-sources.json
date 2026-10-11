@@ -1,32 +1,21 @@
 {
-  "remglk": {
-    "revision": "7d53a46a9d40d2e569b154e4740e8ac4eee67cb8",
-    "url": "https://codeload.github.com/erkyrath/remglk/tar.gz/7d53a46a9d40d2e569b154e4740e8ac4eee67cb8",
-    "sha256": "db13d2655a87adf10641574f6b2136847a4ee6265b718163c6569b50d16383e9"
-  },
-  "glulxe": {
-    "revision": "56ab8743bab565de307bd892c555d8d8897ed517",
-    "url": "https://codeload.github.com/erkyrath/glulxe/tar.gz/56ab8743bab565de307bd892c555d8d8897ed517",
-    "sha256": "f1dcb430fafd451f68b14e62d55c26cf4fd35c49f09ed2b8a0bf0d3544d59e5d"
-  },
-  "inform6": {
-    "revision": "d1066bc214a45ee0f600d2ae7f94ad0210606317",
-    "url": "https://codeload.github.com/DavidKinder/Inform6/tar.gz/d1066bc214a45ee0f600d2ae7f94ad0210606317",
-    "sha256": "c18ffa7b1caa578e780d662ea5170ddaa4d3c80ebd73abe0a020209acf296581"
-  },
-  "inform6lib": {
-    "revision": "33aebe69d2c5693932c4abd239912b1eab0c54df",
-    "url": "https://codeload.github.com/DavidGriffith/inform6lib/tar.gz/33aebe69d2c5693932c4abd239912b1eab0c54df",
-    "sha256": "a2e3b5b39d4c8a1598286fc7941206a1cf0ea61c0b8da451d02a7605e938f950"
-  },
-  "chess": {
-    "version": "1.11.2",
-    "url": "https://files.pythonhosted.org/packages/93/09/7d04d7581ae3bb8b598017941781bceb7959dd1b13e3ebf7b6a2cd843bc9/chess-1.11.2.tar.gz",
-    "sha256": "a8b43e5678fdb3000695bdaa573117ad683761e5ca38e591c4826eba6d25bb39"
-  },
-  "stockfish-macos": {
-    "version": "19",
-    "url": "https://github.com/official-stockfish/Stockfish/releases/download/sf_19/stockfish-macos-universal.tar.gz",
-    "sha256": "a1f0e3bcc5a6927a11fe6fc8e54a779754645f3c2bae2cf13420fd1957adaa77"
+  "version": "4.7.2",
+  "license": "https://github.com/godotengine/godot/blob/4.7.2-stable/LICENSE.txt",
+  "platforms": {
+    "macos-universal": {
+      "url": "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_macos.universal.zip",
+      "sha256": "c58a24e31d720be9d62f60cb5627c4e695fb72f21b0cfe1bc9ccaa9a3b3ba63e",
+      "executable": "Godot.app/Contents/MacOS/Godot"
+    },
+    "linux-x86_64": {
+      "url": "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip",
+      "sha256": "cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4",
+      "executable": "Godot_v4.7.2-stable_linux.x86_64"
+    },
+    "linux-arm64": {
+      "url": "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.arm64.zip",
+      "sha256": "5dd0d86405cf7e8adf79fb6377b38ba682a2846cb378ffe5364f38c01ad29b9d",
+      "executable": "Godot_v4.7.2-stable_linux.arm64"
+    }
   }
 }

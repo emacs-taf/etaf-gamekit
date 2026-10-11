@@ -15,3 +15,7 @@ native/target/
 native/core/target/
 .omx/
 .worktrees/
+
+# Godot import cache and generated resource identities.
+.godot/
+*.gd.uid
