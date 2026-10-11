@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Large flat native observation arrays no longer exhaust Lisp evaluation depth
+  while copying data for validators and views.
+
 ### Added
 
 - OpenSpiel games support bounded undo/redo, including chance outcomes and the

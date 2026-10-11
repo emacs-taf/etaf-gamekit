@@ -21,6 +21,8 @@ for line in sys.stdin:
     observation = {'schema': 'fixture/1', 'rows': ['frame-0'], 'pid': os.getpid(), 'count': count}
     reply = {'version': 1, 'id': request['id'], 'revision': revision,
              'capabilities': ['step'], 'observation': observation, 'error': None}
+    if mode == 'large':
+        observation['tensor'] = list(range(4000))
     if mode == 'stale' and request['op'] == 'step':
         reply['revision'] = 1
     if mode == 'uncorrelated':

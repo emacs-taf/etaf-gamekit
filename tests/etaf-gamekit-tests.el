@@ -197,6 +197,23 @@
           (should (eq (etaf-gamekit-status session) 'ready)))
       (etaf-gamekit-test--dispose session))))
 
+(ert-deftest etaf-gamekit-large-observations-remain-detached ()
+  "A large flat native tensor remains usable without consuming Lisp call depth."
+  (let ((session (etaf-gamekit-test--peer "large")))
+    (unwind-protect
+        (progn
+          (etaf-gamekit-test--wait session)
+          (should (eq (etaf-gamekit-status session) 'ready))
+          (let ((tensor (etaf-gamekit-view session :tensor)))
+            (should (= 4000 (length tensor)))
+            (should (= 3999 (car (last tensor))))
+            (setcar tensor -1)
+            (should (= 0 (car (plist-get (etaf-gamekit-observation session) :tensor)))))
+          (etaf-gamekit-action session "step")
+          (etaf-gamekit-test--wait session)
+          (should (= 1 (plist-get (etaf-gamekit-view session) :count))))
+      (etaf-gamekit-test--dispose session))))
+
 (ert-deftest etaf-gamekit-transport-coalesces-to-the-newest-visible-frame ()
   "A burst preserves the final backend observation and displayed characters."
   (let ((session (etaf-gamekit-test--peer "burst")))

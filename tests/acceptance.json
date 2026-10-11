@@ -10,6 +10,11 @@
   "support": [],
   "cases": [
     {
+      "name": "etaf-gamekit-large-observations-remain-detached",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "A large flat native tensor remains usable without consuming Lisp call depth."
+    },
+    {
       "name": "salvage-standalone-project-routes-input-to-its-own-rules",
       "file": "tests/salvage-tests.el",
       "purpose": "A relocated game project renders and routes native input through GameKit."
