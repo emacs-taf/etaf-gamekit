@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "load_path": [
+    ".",
+    "../ecss",
+    "../ebox",
+    "../etaf",
+    "../etaf-ui"
+  ],
+  "support": [],
+  "cases": [
+    {
+      "name": "etaf-gamekit-story-native-input-submits-a-command",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Native field typing and Return reach the engine and update the transcript."
+    },
+    {
+      "name": "etaf-gamekit-observations-preserve-an-action-rejection",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "An unsolicited display frame cannot erase the last action's rejection."
+    },
+    {
+      "name": "etaf-gamekit-chess-displays-moves-rejections-and-engine-replies",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Catalog interactions change a real engine position and display rejection."
+    },
+    {
+      "name": "etaf-gamekit-story-input-save-and-restore-use-native-state",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "A story snapshot restores its room and held object through the public API."
+    },
+    {
+      "name": "etaf-gamekit-transport-handles-fragments-and-detaches-observations",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Partial JSON waits for completion; callers cannot mutate accepted views."
+    },
+    {
+      "name": "etaf-gamekit-transport-coalesces-to-the-newest-visible-frame",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "A burst preserves the final backend observation and displayed characters."
+    },
+    {
+      "name": "etaf-gamekit-transport-rejects-stale-invalid-and-dead-peers",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Bad protocol, a timeout and process death become inspectable failures."
+    },
+    {
+      "name": "etaf-gamekit-close-and-buffer-death-release-the-child",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Closing and killing a buffer stop its owned child, idempotently."
+    }
+  ]
+}
