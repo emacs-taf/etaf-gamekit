@@ -6,7 +6,7 @@ definitions, independent running instances, state publication, actions,
 lifecycle management and backend adapters.
 
 The core depends on ETAF. It contains no game application and does not load the
-example games or etaf-ui. Applications choose their own catalog components.
+game applications or etaf-ui. Applications choose their own catalog components.
 
 Included adapters connect games to **Godot**, **boardgame.io** and **OpenSpiel**.
 A game's definition selects its backend; applications start a game definition:
@@ -41,10 +41,10 @@ configure a backend, compose a frontend, manage instances and add an adapter.
 The [package entry](etaf-gamekit.el) is the supported API inventory;
 [architecture](docs/architecture.md) explains responsibilities and engine choices.
 
-[Salvage Station](docs/manual.md#salvage-station-example) is a complete application under
-`examples/salvage/`. Its game code consumes the same public framework API that a
-separate repository would use. Load its `salvage` feature and run
-`M-x salvage-open` to play it.
+Game applications are independently maintained under the `etaf-games` workspace.
+For example, `etaf-solitaire` uses OpenSpiel and `etaf-salvage` uses Godot; each
+owns its entry, interface, rules configuration, resources and checks. Install
+and launch a game through its own package, not through a framework launcher.
 
 For framework development, install all three backends with
 `make engine-all GAMEKIT_PYTHON=python3.11`, then run `make check`.

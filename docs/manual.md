@@ -62,9 +62,9 @@ A view factory receives the running instance and returns any ETAF View.
 during its first render. Use local component refs for selection, dialogs and
 unsent input. Authoritative game state remains behind the backend adapter.
 
-The [Salvage application](#salvage-station-example) is a larger consumer:
-its root entry, Godot rules, theme and complete ETAF interface all live under
-`examples/salvage/`. Requiring GameKit does not load that application.
+Game applications are independent packages in the `etaf-games` workspace.
+For example, Salvage Station keeps its Godot project and complete ETAF interface
+in `etaf-salvage`; GameKit contains no game-specific launcher or presentation.
 
 ## Read state and submit actions
 
@@ -281,62 +281,6 @@ uncorrelated replies fail the instance. EOF ends the backend's lifetime.
 Decoded objects are keyword plists, arrays are lists, false is `:false`, and
 null is nil. The observation schema belongs to the game or its chosen adapter.
 
-## Salvage Station example
-
-Salvage Station is a standalone GameKit application with a headless Godot
-simulation and a native ETAF interface. The application owns its rules, theme,
-components and launch command; it uses only public GameKit, ETAF and catalog
-APIs.
-
-Install GameKit, ETAF, etaf-ui and the [Godot backend](#godot), then add the
-application directory to `load-path`:
-
-```elisp
-(add-to-list 'load-path "/path/to/etaf-gamekit/examples/salvage")
-(require 'salvage)
-(salvage-open)
-```
-
-`salvage-game` is a game definition. `salvage-open` starts an independent
-instance, displays its buffer and fits the view to its window. The same
-application directory can be used outside the framework repository; its Godot
-project is resolved relative to its own entry file. The application's
-[entry Commentary](../examples/salvage/salvage.el) describes its public API.
-
-Recover three power cores from the station and return to the extraction dock.
-The game starts in tactical pause. Godot owns movement, collision, pathfinding,
-drones, energy, damage, score and victory/defeat. ETAF owns selection, tabs,
-dialogs and all presentation.
-
-| Input | Action |
-| --- | --- |
-| P / Launch / Pause | Start or pause simulation |
-| W A S D | Extend the navigation destination by one cardinal tile |
-| Click deck | Plot a route around bulkheads |
-| Click an object | Inspect it; use Plot route to target to navigate there |
-| 1 / EMP | Disable drones within five tiles; costs 20 energy, four-second cooldown |
-| 2 / Shield | Protect the hull for five seconds; costs 25 energy |
-| Cargo → Repair | Use one of two kits to restore up to 40 hull |
-| F1 / Help | Open the flight manual |
-| Save / Load | Choose an explicit local snapshot path |
-
-Loading validates a snapshot before changing the world, resumes paused and
-clears navigation routes. Snapshots retain position, cargo, enemies, resources,
-cooldowns, score, elapsed time and events. Closing makes no implicit save.
-
-The map stays 32×18 cells, each two character columns by one text row. Resizing
-reflows surrounding panels without stretching the world. Narrow tall windows
-put panels below the map; narrow short windows expose them through **Panels**.
-The minimum canvas is 76 character columns by 30 rows. Smaller windows clip or
-scroll that canvas with soft wrapping disabled.
-
-For GUI acceptance, load ETAF's `scripts/emacs-gui-verifier.el` and GameKit's
-`scripts/etaf-gamekit-gui-scenarios.el` into a dedicated graphical Emacs using
-these checkouts. Schedule `etaf-gamekit-gui-run` with a fresh evidence directory.
-It checks the complete expedition, native keys, fixed map dimensions, panels,
-width/height adaptation and restart, then restores frame geometry. Inspect its
-screenshots; functional assertions alone do not certify appearance.
-
 ## Validate framework changes
 
 `make check` runs structure/API validation, compilation, game-definition and
@@ -358,6 +302,6 @@ OpenSpiel action-to-publication workloads. Each action must reach the backend,
 be acknowledged and appear in the game-owned view; the 16.67 ms budget is an
 acceptance target, not a measured claim.
 
-The maintained Salvage integration workloads and GUI adapter remain separate
-acceptance surfaces. See the [example](#salvage-station-example). Batch and
-background GUI measurements do not certify foreground OS input latency.
+Each game owns its integration workloads and GUI acceptance in its own
+repository. Framework transport measurements cannot replace application
+acceptance. Batch and background GUI timing do not certify OS input latency.

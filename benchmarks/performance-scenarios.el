@@ -8,7 +8,6 @@
 ;;; Code:
 (require 'etaf-gamekit)
 (require 'etaf-ui)
-(declare-function salvage-open "salvage" ())
 (declare-function taf-benchmark-register "performance-driver" (id &rest properties))
 (defconst etaf-gamekit-benchmark--directory
   (file-name-directory (or load-file-name buffer-file-name)))
@@ -100,59 +99,6 @@
          :budget-ms (+ (/ 1000.0 fps) 33.333)
          :description (format "Next displayed frame at %d Hz; 80x24; %d%% cells change" fps amount)
          :setup (lambda (mode) (etaf-gamekit-benchmark--grid mode amount fps)))))))
-
-(defun etaf-gamekit-benchmark--salvage (mode operation)
-  "Create a complete game surface for MODE and measured OPERATION."
-  (let ((load-path (cons (expand-file-name "../examples/salvage" etaf-gamekit-benchmark--directory) load-path)))
-    (require 'salvage))
-  (let* ((session (salvage-open))
-         (runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
-         (expected nil) (target nil))
-    (list
-     :buffer (etaf-gamekit-buffer session)
-     :ready (lambda ()
-              (if (eq mode 'batch) (etaf-runtime-refit runtime 1200 46)
-                (etaf-refit runtime (selected-window)))
-              (and (eq (etaf-gamekit-status session) 'ready)
-                   (etaf-host-ref-size runtime 'salvage-map)))
-     :invoke
-     (lambda (index)
-       (pcase operation
-         ('select
-          (setq expected (if (cl-evenp index) "Power core 1" "Power core 2"))
-          (etaf-dispatch-event runtime (if (cl-evenp index) 'salvage-tile-3-12 'salvage-tile-4-26) 'press))
-         ('route
-          (setq expected (if (cl-evenp index) '(6 4) '(6 5))
-                target (if (cl-evenp index) 'salvage-tile-4-6 'salvage-tile-5-6))
-          (etaf-dispatch-event runtime target 'press))
-         ('resize
-          (setq expected (if (cl-evenp index) 900 1200))
-          (etaf-runtime-refit runtime expected 46))))
-     :settled
-     (lambda ()
-       (pcase operation
-         ('select (string-match-p expected (etaf-gamekit-benchmark--text session)))
-         ('route
-          (and (eq (etaf-gamekit-status session) 'ready)
-               (equal (car (last (plist-get (plist-get (etaf-gamekit-observation session) :world) :route))) expected)
-               (equal (plist-get (etaf-runtime-host-props-for runtime target) :color) "#73BDEB")))
-         ('resize (= (car (etaf-runtime-viewport runtime)) expected))))
-     :verify (lambda () (or (etaf-gamekit-last-error session) t))
-     :outcome (lambda () (list :operation (symbol-name operation)
-                                  :map (let ((size (etaf-host-ref-size runtime 'salvage-map)))
-                                         (vector (car size) (cdr size)))))
-     :cleanup (lambda () (etaf-gamekit-close session)
-                (kill-buffer (etaf-gamekit-buffer session))))))
-
-(dolist (case '((select 16 "Select an object and publish target intelligence")
-                (route 50 "Deck click through Godot pathfinding to painted route")
-                (resize 50 "Refit a fixed-cell game between 900 and 1200 pixels")))
-  (let ((operation (car case)))
-    (taf-benchmark-register
-     (format "etaf-gamekit.salvage.%s" operation)
-     :version 2 :modes '(batch gui) :isolation 'series :impact 'subtree
-     :budget-ms (cadr case) :description (caddr case)
-     :setup (lambda (mode) (etaf-gamekit-benchmark--salvage mode operation)))))
 
 (etaf-define-component etaf-gamekit-benchmark--kernel-view (&key session kind)
   :view

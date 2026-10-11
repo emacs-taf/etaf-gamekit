@@ -10,8 +10,8 @@
 ;; Applications define games with their rules, backend configuration and ETAF
 ;; presentation. GameKit starts independent game instances and owns transport,
 ;; state publication, actions and lifetime. Backend adapters remain beneath this
-;; game-level contract. Runnable applications live in examples/; requiring the
-;; framework does not load them. See docs/manual.md for standalone game projects.
+;; game-level contract. Game applications live in the etaf-games workspace;
+;; requiring the framework does not load them. See docs/manual.md for projects.
 ;;
 ;; Error: etaf-gamekit-error
 ;; Invalid session operation, missing runtime or malformed protocol message.

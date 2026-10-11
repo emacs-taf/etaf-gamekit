@@ -15,11 +15,6 @@
       "purpose": "A large flat native tensor remains usable without consuming Lisp call depth."
     },
     {
-      "name": "salvage-standalone-project-routes-input-to-its-own-rules",
-      "file": "tests/salvage-tests.el",
-      "purpose": "A relocated game project renders and routes native input through GameKit."
-    },
-    {
       "name": "etaf-gamekit-game-definitions-create-independent-instances",
       "file": "tests/etaf-gamekit-tests.el",
       "purpose": "A game definition creates independent worlds and supplies its view metadata."

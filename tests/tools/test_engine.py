@@ -6,7 +6,6 @@ import queue
 import subprocess
 import tempfile
 import threading
-import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +19,7 @@ class Engine:
         self.messages = queue.Queue()
         self.process = subprocess.Popen(
             command or [str(CACHE / 'bin/godot'), '--headless', '--no-header', '--path',
-             str(ROOT / 'examples/salvage'), '--script', str(ROOT / 'native/godot/gamekit.gd')],
+             str(ROOT / 'tests/fixtures/godot'), '--script', str(ROOT / 'native/godot/gamekit.gd')],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8')
         self.reader = threading.Thread(target=self._read, daemon=True)
@@ -52,14 +51,6 @@ class Engine:
                 return result
             assert result['id'] is None
 
-    def until(self, predicate, timeout=10):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            result = self.receive(max(0.01, deadline - time.monotonic()))
-            if predicate(result['observation']):
-                return result['observation']
-        raise AssertionError('Expected game state was not reached')
-
     def close(self):
         self.process.stdin.close()
         try:
@@ -77,113 +68,23 @@ class Engine:
             raise AssertionError(f'Unexpected engine exit/diagnostics: {self.process.returncode}: {error!r}')
 
 
-def pilot(view):
-    return next(entity for entity in view['world']['entities'] if entity['kind'] == 'pilot')
-
-
-class EngineContract(unittest.TestCase):
-    def engine(self):
+class GodotBridgeContract(unittest.TestCase):
+    def test_project_commands_rejections_and_start_lifetime(self):
         engine = Engine()
         self.addCleanup(engine.close)
-        response = engine.request('start')
-        self.assertIsNone(response['error'])
-        self.assertEqual(response['observation']['schema'], 'salvage/1')
-        return engine
+        started = engine.request('start')
+        self.assertEqual(started['observation'], {'schema': 'counter/1', 'count': 0})
+        self.assertIsNone(started['error'])
+        self.assertTrue(engine.request('start')['error'])
+        bad = engine.request('increment', amount='invalid')
+        self.assertTrue(bad['error'])
+        self.assertEqual(bad['observation'], started['observation'])
+        changed = engine.request('increment', amount=3)
+        self.assertIsNone(changed['error'])
+        self.assertEqual(changed['observation']['count'], 3)
 
-    def test_rejected_coordinates_and_blocked_tiles_preserve_paused_state(self):
-        engine = self.engine()
-        before = engine.request('save', path='/missing-gamekit-directory/run.json')['observation']
-        for operation, values in [('navigate', {'x': 9, 'y': 1}),
-                                   ('move', {'x': 1, 'y': 1}),
-                                   ('move', {'x': 1.5, 'y': 0}),
-                                   ('navigate', {'x': 'bad', 'y': 4}),
-                                   ('load', {'path': 12})]:
-            rejected = engine.request(operation, **values)
-            self.assertTrue(rejected['error'])
-            self.assertEqual(rejected['observation'], before)
-        self.assertTrue(engine.request('repair')['error'])
-        self.assertEqual(engine.request('navigate', x=12, y=3)['observation']['pilot']['health'], 100)
 
-    def test_pathfinding_crosses_doorways_and_real_simulation_can_win(self):
-        engine = self.engine()
-        plotted = engine.request('navigate', x=12, y=3)['observation']
-        self.assertIn([9, 4], plotted['world']['route'])
-        self.assertEqual((pilot(plotted)['x'], pilot(plotted)['y']), (4, 4))
-        self.assertIsNone(engine.request('pause')['error'])
-        first = engine.until(lambda view: view['pilot']['cores'] == 1)
-        self.assertGreater(first['mission']['seconds'], 0)
-        pulsed = engine.request('pulse')
-        self.assertIsNone(pulsed['error'])
-        self.assertLess(pulsed['observation']['mission']['drones'], 3)
-        self.assertTrue(engine.request('pulse')['error'])
-        self.assertIsNone(engine.request('shield')['error'])
-        for count, x, y in [(2, 26, 4), (3, 26, 14)]:
-            self.assertIsNone(engine.request('navigate', x=x, y=y)['error'])
-            engine.until(lambda view: view['pilot']['cores'] >= count)
-        self.assertIsNone(engine.request('navigate', x=3, y=14)['error'])
-        won = engine.until(lambda view: view['mission']['won'])
-        self.assertGreaterEqual(won['pilot']['score'], 750)
-        self.assertFalse(won['mission']['lost'])
-        rejected = engine.request('move', x=1, y=0)
-        self.assertTrue(rejected['error'])
-        self.assertEqual(rejected['observation'], won)
-        restarted = engine.request('restart')['observation']
-        self.assertEqual(restarted['pilot']['cores'], 0)
-        self.assertTrue(restarted['mission']['paused'])
-
-    def test_damage_repair_and_defeat_are_authoritative(self):
-        engine = self.engine()
-        engine.request('navigate', x=12, y=3)
-        engine.request('pause')
-        engine.until(lambda view: view['pilot']['health'] <= 88)
-        damaged = engine.request('pause')['observation']
-        repaired = engine.request('repair')
-        self.assertIsNone(repaired['error'])
-        self.assertEqual(repaired['observation']['pilot']['health'], min(100, damaged['pilot']['health'] + 40))
-        self.assertEqual(repaired['observation']['pilot']['repairs'], 1)
-        engine.request('pause')
-        lost = engine.until(lambda view: view['mission']['lost'], timeout=15)
-        self.assertEqual(lost['pilot']['health'], 0)
-        self.assertFalse(lost['mission']['won'])
-        rejected = engine.request('move', x=1, y=0)
-        self.assertTrue(rejected['error'])
-        self.assertEqual(rejected['observation'], lost)
-
-    def test_snapshot_restores_progress_and_bad_input_is_atomic(self):
-        engine = self.engine()
-        engine.request('navigate', x=12, y=3)
-        engine.request('pause')
-        engine.until(lambda view: view['pilot']['cores'] == 1)
-        before = engine.request('pause')['observation']
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'run.json'
-            self.assertIsNone(engine.request('save', path=str(path))['error'])
-            self.assertTrue(path.is_file())
-            engine.request('restart')
-            restored = engine.request('load', path=str(path))
-            self.assertIsNone(restored['error'])
-            view = restored['observation']
-            self.assertEqual(view['pilot'], before['pilot'])
-            self.assertEqual(pilot(view), pilot(before))
-            self.assertTrue(view['mission']['paused'])
-            identifiers = [event['id'] for event in view['events']]
-            self.assertEqual(len(identifiers), len(set(identifiers)))
-            for invalid in ('{broken', '{}', '[]', 'x' * (1024 * 1024 + 1)):
-                path.write_text(invalid)
-                rejected = engine.request('load', path=str(path))
-                self.assertTrue(rejected['error'])
-                self.assertEqual(rejected['observation'], view)
-
-    def test_sessions_own_independent_worlds(self):
-        first, second = self.engine(), self.engine()
-        first.request('navigate', x=7, y=4)
-        first.request('pause')
-        moved = first.until(lambda view: pilot(view)['x'] == 7)
-        other = second.request('save', path='/missing-gamekit-directory/run.json')['observation']
-        self.assertNotEqual(pilot(moved), pilot(other))
-        self.assertEqual((pilot(other)['x'], pilot(other)['y']), (4, 4))
-        self.assertEqual(other['mission']['seconds'], 0)
-
+class EngineSetupContract(unittest.TestCase):
     def test_setup_manifest_missing_cache_and_existing_executable(self):
         command = ['python3', str(ROOT / 'scripts/setup-engine.py')]
         manifest = subprocess.run([*command, '--manifest'], capture_output=True, text=True, check=True)

@@ -3,15 +3,12 @@
 EMACS ?= emacs
 GAMEKIT_PYTHON ?= python3
 GAMEKIT_CACHE ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/emacs-taf/game-engines
-LOAD_PATH = -L . -L lisp -L examples/salvage -L ../etaf-ui -L ../etaf -L ../ebox -L ../ecss -L ../etaf/scripts
-SOURCES = lisp/etaf-gamekit-session.el lisp/etaf-gamekit-backends.el lisp/etaf-gamekit-game.el lisp/etaf-gamekit-view.el etaf-gamekit.el examples/salvage/salvage.el benchmarks/performance-scenarios.el tests/etaf-gamekit-tests.el tests/salvage-tests.el scripts/etaf-gamekit-gui-scenarios.el
+LOAD_PATH = -L . -L lisp -L ../etaf-ui -L ../etaf -L ../ebox -L ../ecss
+SOURCES = lisp/etaf-gamekit-session.el lisp/etaf-gamekit-backends.el lisp/etaf-gamekit-game.el lisp/etaf-gamekit-view.el etaf-gamekit.el benchmarks/performance-scenarios.el tests/etaf-gamekit-tests.el
 
 .PHONY: compile test check clean structure-check setup-hooks acceptance api-check engine engine-check tool-test engine-all engine-boardgame-io engine-openspiel
-compile:
-	rm -f *.elc lisp/*.elc examples/salvage/*.elc tests/*.elc benchmarks/*.elc scripts/etaf-gamekit-gui-scenarios.elc
-	$(EMACS) -Q --batch $(LOAD_PATH) --eval '(setq load-prefer-newer t byte-compile-error-on-warn t)' \
-		--eval '(require (quote cl-lib))' \
-		--eval '(unless (cl-every (function byte-compile-file) (quote ($(foreach file,$(SOURCES),"$(file)")))) (kill-emacs 1))'
+compile: clean
+	$(EMACS) -Q --batch $(LOAD_PATH) --eval '(setq load-prefer-newer t byte-compile-error-on-warn t)' --eval '(require (quote cl-lib))' --eval '(unless (cl-every (function byte-compile-file) (quote ($(foreach file,$(SOURCES),"$(file)")))) (kill-emacs 1))'
 structure-check:
 	python3 scripts/check-repository.py
 engine:
@@ -36,6 +33,6 @@ api-check:
 test: acceptance tool-test
 check: structure-check compile acceptance tool-test api-check
 clean:
-	rm -f *.elc lisp/*.elc examples/salvage/*.elc tests/*.elc benchmarks/*.elc scripts/etaf-gamekit-gui-scenarios.elc
+	rm -f *.elc lisp/*.elc tests/*.elc benchmarks/*.elc scripts/*.elc
 setup-hooks:
 	git config --local core.hooksPath .githooks

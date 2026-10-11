@@ -1,9 +1,7 @@
-; SPDX-License-Identifier: GPL-3.0-or-later
 config_version=5
 
 [application]
-config/name="Salvage Station"
-run/flush_stdout_on_print=true
+config/name="GameKit protocol fixture"
 
 [gamekit]
 game_script="res://game.gd"
