@@ -10,24 +10,34 @@
   "support": [],
   "cases": [
     {
-      "name": "etaf-gamekit-salvage-controls-change-the-live-world",
-      "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "Tile selection, target routing and skill controls update a real game."
+      "name": "salvage-standalone-project-routes-input-to-its-own-rules",
+      "file": "tests/salvage-tests.el",
+      "purpose": "A relocated game project renders and routes native input through GameKit."
     },
     {
-      "name": "etaf-gamekit-salvage-native-keys-retain-rapid-input",
+      "name": "etaf-gamekit-game-definitions-create-independent-instances",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "Native directional keys reach the backend in order while paused."
+      "purpose": "A game definition creates independent worlds and supplies its view metadata."
     },
     {
-      "name": "etaf-gamekit-salvage-resizes-with-a-readable-minimum",
+      "name": "etaf-gamekit-backend-registration-preserves-owned-games",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "Reflow preserves map metrics and panel state; tiny viewports clip the canvas."
+      "purpose": "Replacing/removing an adapter affects future starts without taking live games."
     },
     {
-      "name": "etaf-gamekit-salvage-snapshot-restores-through-the-session",
+      "name": "etaf-gamekit-game-configurations-are-validated-and-detached",
       "file": "tests/etaf-gamekit-tests.el",
-      "purpose": "A real saved expedition loads paused and remains valid for its frontend."
+      "purpose": "Game options are detached data; invalid definitions and overrides fail clearly."
+    },
+    {
+      "name": "etaf-gamekit-games-route-actions-to-different-native-kernels",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Game definitions run boardgame.io turns and OpenSpiel poker through one API."
+    },
+    {
+      "name": "etaf-gamekit-game-snapshots-restore-through-the-same-action-api",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "Opaque native/replay snapshots restore observations without frontend parsing."
     },
     {
       "name": "etaf-gamekit-transport-fragments-detached-values-and-bounded-input",

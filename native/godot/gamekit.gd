@@ -97,8 +97,10 @@ func _process(delta: float) -> bool:
 		if request.has("_eof"):
 			return true
 		var failure: String = ""
-		if request.op == "start":
+		if request.op == "start" and not connected:
 			connected = true
+		elif not connected or request.op == "start":
+			failure = "Start once before sending advertised actions"
 		else:
 			failure = game.command(request.op, request.args)
 		_emit(request.id, null if failure.is_empty() else failure)

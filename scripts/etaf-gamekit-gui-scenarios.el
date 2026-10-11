@@ -5,6 +5,10 @@
 ;; This development adapter uses the documented generic GUI verifier tool.
 ;;; Code:
 (require 'etaf-gamekit)
+(declare-function salvage-open "salvage" ())
+(let ((load-path (cons (expand-file-name "../examples/salvage"
+                                       (file-name-directory (or load-file-name buffer-file-name))) load-path)))
+  (require 'salvage))
 (require 'emacs-gui-verifier)
 
 (defun etaf-gamekit-gui--session (context)
@@ -62,7 +66,7 @@ Screenshots require visual review; use the performance driver for latency."
           :claim "Native game interaction and responsive width/height layouts"
           :initialize
           (lambda (context)
-            (let ((session (etaf-gamekit-open-demo)))
+            (let ((session (salvage-open)))
               (etaf-gui-verifier-context-put context 'game session)
               (etaf-gui-verifier-context-select-buffer context (etaf-gamekit-buffer session))))
           :invariants

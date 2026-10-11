@@ -1,40 +1,50 @@
 # etaf-gamekit
 
-Game kernels with rich, native ETAF frontends. GameKit supplies asynchronous
-sessions, a versioned command/observation protocol and an included headless Godot
-bridge. Applications compose their interface from ETAF and etaf-ui; the game
-process owns simulation, rules and saved state.
+A framework for building games with native ETAF interfaces. A game project owns
+its rules, assets, presentation and launch command. GameKit provides game
+definitions, independent running instances, state publication, actions,
+lifecycle management and backend adapters.
 
-The maintained game, **Salvage Station**, has a live station map, navigation,
-security drones, skills, cargo, target inspection and save/restore. Its frontend
-reflows panels around a fixed-size map at different window widths and heights. Godot supplies physics and pathfinding;
-it opens no game-rendering window.
+The core depends on ETAF. It contains no game application and does not load the
+example games or etaf-ui. Applications choose their own catalog components.
 
-Requires Emacs 29.1+, sibling ETAF/etaf-ui checkouts and Godot 4.7+.
-Python 3.9+ installs the pinned Godot 4.7.2 binary on macOS or Linux x86-64/arm64:
-
-```sh
-make engine
-# Or: python3 scripts/setup-engine.py --godot /path/to/godot
-```
-
-Add the repository roots of this package and its dependencies to `load-path`:
+Included adapters connect games to **Godot**, **boardgame.io** and **OpenSpiel**.
+A game's definition selects its backend; applications start a game definition:
 
 ```elisp
 (require 'etaf-gamekit)
-(etaf-gamekit-open-demo)
+
+(etaf-gamekit-define-game my-poker
+  :title "My Poker"
+  :backend 'openspiel
+  :options '(:game "kuhn_poker" :player 0 :seed 42)
+  :view (lambda (instance)
+          (etaf-view
+           (text (expr (or (etaf-gamekit-view instance :information_state)
+                           "Starting game…"))))))
+
+(let ((instance (etaf-gamekit-start my-poker)))
+  (display-buffer (etaf-gamekit-buffer instance)))
 ```
 
-Press **P** to launch or pause. Click empty deck to navigate; click an object to
-inspect it. **W A S D** steer, **1** fires an EMP and **2** activates a shield.
-Recover three cores, then return to the extraction dock. Save and Load preserve
-an expedition; restored games start paused.
+Requires Emacs 29.1+ and ETAF with its dependencies on `load-path`. Install the
+backend used by your game from this repository:
 
-The core accepts application-defined observation objects rather than a fixed
-set of game genres. Other runtimes can implement the same protocol. Multiplayer,
-asset downloading and audio mixing are not provided by this MVP.
+| Backend | Installation | Runtime |
+| --- | --- | --- |
+| Godot | `make engine` | Pinned Godot 4.7.2; macOS or Linux x86-64/arm64 |
+| boardgame.io | `make engine-boardgame-io` | Node.js 18+; pinned boardgame.io 0.50.2 |
+| OpenSpiel | `make engine-openspiel GAMEKIT_PYTHON=python3.11` | Python 3.11+; pinned OpenSpiel 2.0.2 |
 
-See [the manual](docs/manual.md) for integration, saving and recovery,
-[the package entry](etaf-gamekit.el) for supported APIs, and
-[architecture](docs/architecture.md) for ownership and backend selection.
-Run `make check` after installing the engine.
+The [manual](docs/manual.md) explains how to create a separate game project,
+configure a backend, compose a frontend, manage instances and add an adapter.
+The [package entry](etaf-gamekit.el) is the supported API inventory;
+[architecture](docs/architecture.md) explains responsibilities and engine choices.
+
+[Salvage Station](docs/manual.md#salvage-station-example) is a complete application under
+`examples/salvage/`. Its game code consumes the same public framework API that a
+separate repository would use. Load its `salvage` feature and run
+`M-x salvage-open` to play it.
+
+For framework development, install all three backends with
+`make engine-all GAMEKIT_PYTHON=python3.11`, then run `make check`.

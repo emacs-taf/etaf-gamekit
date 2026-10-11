@@ -1,4 +1,4 @@
-"""Exercise the documented Godot bridge and game through their JSON protocol."""
+"""Exercise native backend command, observation and snapshot contracts."""
 import json
 import os
 from pathlib import Path
@@ -14,11 +14,12 @@ CACHE = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'emacs-
 
 
 class Engine:
-    def __init__(self):
+    def __init__(self, command=None, expected_stderr=''):
         self.number = self.revision = 0
+        self.expected_stderr = expected_stderr
         self.messages = queue.Queue()
         self.process = subprocess.Popen(
-            [str(CACHE / 'bin/godot'), '--headless', '--no-header', '--path',
+            command or [str(CACHE / 'bin/godot'), '--headless', '--no-header', '--path',
              str(ROOT / 'examples/salvage'), '--script', str(ROOT / 'native/godot/gamekit.gd')],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8')
@@ -72,8 +73,8 @@ class Engine:
             error = self.process.stderr.read()
             self.process.stdout.close()
             self.process.stderr.close()
-        if self.process.returncode != 0 or error:
-            raise AssertionError(error or self.process.returncode)
+        if self.process.returncode != 0 or error != self.expected_stderr:
+            raise AssertionError(f'Unexpected engine exit/diagnostics: {self.process.returncode}: {error!r}')
 
 
 def pilot(view):
@@ -198,6 +199,113 @@ class EngineContract(unittest.TestCase):
             checked = subprocess.run([*command, '--check', '--cache', directory],
                                      capture_output=True, text=True, check=True)
             self.assertIn('4.', json.loads(checked.stdout)['version'])
+
+
+class RuleKernelContracts(unittest.TestCase):
+    def backend(self, name, game=None, expected_stderr=''):
+        if name == 'boardgame-io':
+            command = ['node', str(ROOT / 'native/boardgame-io/bridge.cjs'), '--game',
+                       str(ROOT / 'tests/fixtures/tabletop.cjs'), '--player', '0', '--seed', 'contract']
+        else:
+            command = [str(CACHE / 'openspiel/bin/python'), str(ROOT / 'native/openspiel/bridge.py'),
+                       '--game', game, '--player', '0', '--seed', '42']
+        engine = Engine(command, expected_stderr)
+        self.addCleanup(engine.close)
+        response = engine.request('start')
+        self.assertIsNone(response['error'])
+        return engine, response['observation']
+
+    def test_boardgame_rules_turns_phases_undo_and_player_views(self):
+        engine, before = self.backend('boardgame-io', expected_stderr='ERROR: invalid move: claim args: 99\n')
+        self.assertNotIn('hands', before['state']['G'])
+        rejected = engine.request('move', name='claim', args=[99])
+        self.assertTrue(rejected['error'])
+        self.assertEqual(rejected['observation'], before)
+        self.assertEqual(engine.request('move', name='claim', args=[2])['observation']['state']['G']['pool'], 10)
+        self.assertEqual(engine.request('undo')['observation']['state']['G']['pool'], 12)
+        self.assertEqual(engine.request('redo')['observation']['state']['G']['pool'], 10)
+        self.assertEqual(engine.request('event', name='endTurn')['observation']['state']['ctx']['currentPlayer'], '1')
+        inactive = engine.request('move', name='claim', args=[2])
+        self.assertTrue(inactive['error'])
+        engine.request('set-player', player='1')
+        engine.request('move', name='claim', args=[3])
+        engine.request('event', name='endTurn')
+        engine.request('set-player', player='0')
+        final = engine.request('move', name='claim', args=[1])
+        self.assertIsNone(final['error'])
+        self.assertEqual(final['observation']['state']['ctx']['phase'], 'final')
+        spectator = engine.request('set-player', player=None)['observation']
+        self.assertIsNone(spectator['state']['G']['hand'])
+
+    def test_boardgame_replay_snapshot_restores_rng_and_rejects_bad_input(self):
+        engine, _ = self.backend('boardgame-io')
+        engine.request('move', name='claim', args=[2])
+        before = engine.request('set-player', player='1')['observation']
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'tabletop.snapshot'
+            self.assertIsNone(engine.request('save', path=str(target))['error'])
+            engine.request('reset')
+            loaded = engine.request('load', path=str(target))
+            self.assertIsNone(loaded['error'])
+            self.assertEqual(loaded['observation'], before)
+            for text in ('{}', '{broken', '[]'):
+                target.write_text(text)
+                bad = engine.request('load', path=str(target))
+                self.assertTrue(bad['error'])
+                self.assertEqual(bad['observation'], before)
+
+    def test_openspiel_resolves_chance_and_validates_player_actions(self):
+        engine, before = self.backend('openspiel', 'kuhn_poker')
+        self.assertEqual(before['current_player'], 0)
+        self.assertEqual([a['id'] for a in before['legal_actions']], [0, 1])
+        bad = engine.request('act', action=999)
+        self.assertTrue(bad['error'])
+        self.assertEqual(bad['observation'], before)
+        passed = engine.request('act', action=0)['observation']
+        self.assertEqual(passed['current_player'], 1)
+        self.assertEqual(passed['legal_actions'], [])
+        self.assertTrue(engine.request('act', action=0)['error'])
+        engine.request('set-player', player=1)
+        ended = engine.request('act', action=0)['observation']
+        self.assertTrue(ended['terminal'])
+        self.assertEqual(sum(ended['returns']), 0)
+        self.assertTrue(engine.request('act', action=0)['error'])
+
+    def test_openspiel_simultaneous_actions_use_the_native_joint_transition(self):
+        engine, before = self.backend('openspiel', 'matrix_rps')
+        self.assertTrue(before['simultaneous'])
+        self.assertEqual(len(before['legal_actions']), 3)
+        bad = engine.request('joint-action', actions=[0])
+        self.assertTrue(bad['error'])
+        self.assertEqual(bad['observation'], before)
+        ended = engine.request('joint-action', actions=[0, 1])
+        self.assertIsNone(ended['error'])
+        self.assertTrue(ended['observation']['terminal'])
+        self.assertEqual(ended['observation']['returns'], [-1, 1])
+
+    def test_openspiel_native_snapshot_preserves_progress_and_future_legality(self):
+        engine, _ = self.backend('openspiel', 'kuhn_poker')
+        before = engine.request('act', action=0)['observation']
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'native.snapshot'
+            self.assertIsNone(engine.request('save', path=str(target))['error'])
+            engine.request('reset')
+            restored = engine.request('load', path=str(target))
+            self.assertIsNone(restored['error'])
+            self.assertEqual(restored['observation'], before)
+            target.write_text('{}')
+            rejected = engine.request('load', path=str(target))
+            self.assertTrue(rejected['error'])
+            self.assertEqual(rejected['observation'], before)
+        engine.request('set-player', player=1)
+        self.assertTrue(engine.request('act', action=0)['observation']['terminal'])
+
+    def test_openspiel_catalog_is_discoverable_without_starting_a_game(self):
+        output = subprocess.run([str(CACHE / 'openspiel/bin/python'),
+                                 str(ROOT / 'native/openspiel/bridge.py'), '--list'],
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(output.stderr, '')
+        self.assertTrue({'kuhn_poker', 'matrix_rps', 'tic_tac_toe'} <= set(json.loads(output.stdout)))
 
 
 if __name__ == '__main__':

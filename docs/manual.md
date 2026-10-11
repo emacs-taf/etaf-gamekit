@@ -1,254 +1,354 @@
-# Using etaf-gamekit
+# Building games with GameKit
 
-## Install and play
+## Create a separate game project
 
-`make engine` installs the pinned Godot runtime from the official release assets
-listed with SHA-256 checksums in `scripts/engine-sources.json`. Python 3.9+ is
-required for setup. The installer supports macOS universal and Linux x86-64/arm64
-builds. `python3 scripts/setup-engine.py --godot /path/to/godot` registers an
-existing Godot 4.7+ executable instead.
+A game is an application that depends on GameKit. Keep its entry, rules, UI and
+assets in its own repository. The framework does not need to know the
+application's name or add a launcher for it.
 
-Downloads and installation files stay under
-`~/.cache/emacs-taf/game-engines`, or the corresponding `XDG_CACHE_HOME` directory.
-The stable command is `bin/godot` inside that cache. `--cache DIRECTORY` selects
-another cache; then set `etaf-gamekit-godot-program` to its `bin/godot` before
-opening a session. `--check` checks the executable without modifying files;
-`--manifest` prints the pinned sources. Setup does not change PATH or Emacs init.
+Add the GameKit and ETAF repository roots to `load-path`, or install them as
+packages. Add etaf-ui when the game uses catalog components. A minimal game
+entry `my-poker.el` can contain:
 
-Add this repository and its ETAF/etaf-ui dependencies to `load-path`, require
-`etaf-gamekit`, and run `M-x etaf-gamekit-open-demo`. The game starts in tactical
-pause, with three cores to recover and three hostile security drones.
+```elisp
+;;; -*- lexical-binding: t; -*-
+(require 'etaf-gamekit)
+(require 'etaf-ui)
 
-| Input | Effect |
+(defun my-poker-view (instance)
+  (etaf-view
+   (etaf-panel :title "My Poker"
+     (etaf-label :text (or (etaf-gamekit-view instance :information_state)
+                          "Starting game…"))
+     (etaf-button :for (action (etaf-gamekit-view instance :legal_actions))
+       :key (plist-get action :id)
+       :label (plist-get action :label)
+       :on-press (lambda ()
+                   (etaf-gamekit-action instance "act"
+                                        (list :action (plist-get action :id))))))))
+
+(etaf-gamekit-define-game my-poker-game
+  :title "My Poker" :backend 'openspiel
+  :options '(:game "kuhn_poker" :player 0 :seed 42)
+  :view #'my-poker-view)
+
+(defun my-poker-open ()
+  (interactive)
+  (let ((instance (etaf-gamekit-start my-poker-game)))
+    (pop-to-buffer (etaf-gamekit-buffer instance))
+    (etaf-refit (etaf-runtime-for-buffer (etaf-gamekit-buffer instance))
+                (selected-window))
+    instance))
+
+(provide 'my-poker)
+```
+
+`my-poker-game` is an inert definition. Each start creates a new instance with
+its own state, buffer and lifetime. This small interface controls player 0;
+a complete local table supplies its own player-switching controls through the
+adapter's `set-player` action. Games with different interfaces still use the
+same definition/start/action/state/lifetime contract.
+
+A definition binds the game's title, backend configuration, view factory and
+optional observation validator. Configuration consists of JSON-compatible
+keyword data. Per-instance `:options` override matching keys without changing
+the definition, for example a different seed or player. Views and validation
+belong to the game project. The callback receives a detached observation and
+must return exactly `t`; a false result or signaled error fails the instance
+with diagnostic context.
+
+A view factory receives the running instance and returns any ETAF View.
+`etaf-gamekit-game-info` supplies the game's name/title/backend, including
+during its first render. Use local component refs for selection, dialogs and
+unsent input. Authoritative game state remains behind the backend adapter.
+
+The [Salvage application](#salvage-station-example) is a larger consumer:
+its root entry, Godot rules, theme and complete ETAF interface all live under
+`examples/salvage/`. Requiring GameKit does not load that application.
+
+## Read state and submit actions
+
+Use `etaf-gamekit-view` inside views and computed values. Its optional top-level
+field argument avoids copying unrelated fields. Use value equality on computed
+JSON fields so unchanged data does not invalidate unrelated panels.
+`etaf-gamekit-observation` returns the latest accepted state immediately.
+Both interfaces return detached values; editing a returned value never changes
+the game or the framework's retained observation.
+
+Unsolicited publication is coalesced to at most 60 Hz. Intermediate streamed
+frames may be skipped. Acknowledged input publishes on the next Emacs event-loop
+turn, with a response burst sharing one publication. Rendering and event-loop
+work add to those scheduling intervals.
+
+Actions use an advertised operation string and keyword-plist arguments. Objects
+are keyword plists, outgoing arrays are vectors, JSON false is `:false` and null
+is nil. The backend validates the action against the current game state.
+Advertised operations describe routing capabilities; they do not mean every
+move is currently legal. The game supplies legal actions, active players,
+resource requirements or other availability facts in its observation.
+
+Up to eight requests may be outstanding. Acknowledgments must arrive in order;
+a full queue rejects additional actions synchronously. The deadline for each
+request begins when sent, and defaults to 15 seconds through
+`etaf-gamekit-request-timeout`. A successful acknowledgment clears the previous
+rejection. Unsolicited frames cannot clear it.
+
+GameKit does not prescribe boards, stories or widget trees. Observations may
+contain entities, cards, inventories, timelines and asset IDs. Resolve asset
+IDs through the game's own content manifest. Compose ETAF image/video and
+etaf-ui media components as needed. Binary assets and rendered frames do not
+belong in state messages.
+
+## Choose and configure a backend
+
+Only the selected backend is required to run a game. Framework development's
+complete `make check` needs all included backends.
+
+### Godot
+
+`make engine` installs the pinned official release after SHA-256 verification.
+Python 3.9+ performs setup. The installer supports macOS universal and Linux
+x86-64/arm64. `python3 scripts/setup-engine.py --godot /path/to/godot` registers
+an existing Godot 4.7+ executable. Files stay under
+`~/.cache/emacs-taf/game-engines`, respecting `XDG_CACHE_HOME`; `--cache DIRECTORY`
+selects another cache, after which `etaf-gamekit-godot-program` must point to its
+`bin/godot`. Setup does not change PATH or Emacs init.
+
+A game definition uses `:backend 'godot` and
+`:options (list :project "/path/to/my-game/godot-project")`.
+The project contains `project.godot` with `gamekit/game_script` pointing to a
+script extending Node or Node2D. The script implements:
+
+- `capabilities() -> Array`: advertised operation names.
+- `command(operation: String, args: Dictionary) -> String`: apply a valid action;
+  return an empty string on success or an explanatory rejection without partial mutation.
+- `observe() -> Dictionary`: the game's complete JSON observation.
+
+The framework's shared bridge handles stdin, ordered requests, shutdown and
+changed-state publication at up to 20 Hz. Commands and simulation run on
+Godot's main thread. Godot starts with `--headless --no-header`; ETAF owns all
+presentation and input. Game scripts keep stdout reserved for the bridge.
+
+### boardgame.io
+
+Install Node.js 18+, then run `make engine-boardgame-io`. The standard npm lock
+file pins the adapter's dependencies; generated `node_modules` is untracked.
+`etaf-gamekit-node-program` selects the Node executable.
+
+A game definition selects `boardgame-io`. Its options are `:game` (an absolute
+JavaScript module path), `:num-players` (default 2), optional `:player` (a string
+ID) and `:seed` (a string). The module exports a normal boardgame.io Game as
+`default` or `game`; regular imports resolve in that game's own project.
+
+The adapter uses the public Client API. boardgame.io owns rules, phases, turns,
+player activity, undo/redo and seeded random state. The observation's
+`state.G` is filtered through the game's `playerView`; `state.ctx` contains its
+native turn/phase context. `moves` and `events` list dispatcher names.
+
+| Operation | Arguments |
 | --- | --- |
-| P / Launch / Pause | Start or pause simulation time |
-| W A S D | Extend the navigation destination by one cardinal tile |
-| Click empty deck | Plot a route around bulkheads |
-| Click a unit/core/dock | Select it in target intelligence |
-| Plot route to target | Navigate to the inspected core or extraction dock |
-| 1 / EMP pulse | Spend 20 energy to disable drones within five tiles; four-second cooldown |
-| 2 / Shield | Spend 25 energy for five seconds of protection |
-| Cargo → Use repair kit | Consume one of two kits to restore up to 40 hull |
-| Objectives | Show the recovery and extraction goals |
-| F1 / Help | Open the flight manual |
+| `move` | `:name` and optional `:args` vector |
+| `event` | `:name` and optional `:args` vector |
+| `undo`, `redo`, `reset` | None; the native game determines availability |
+| `set-player` | `:player` string or nil for the client's unassigned-player mode |
+| `save`, `load` | `:path` to an opaque local snapshot |
 
-Godot owns motion, collision, pathfinding, enemy movement, energy recovery,
-damage, score and victory/defeat. The frontend owns selection, open tabs and
-dialogs. Navigation can be plotted while paused. Skills and commands are
-validated again by the game process; the frontend cannot override game rules.
+This adapter owns one local match. It does not start a network server, lobby or
+AI player. Player switching is a local application's control, not an
+authentication boundary.
 
-The map keeps its intrinsic **32×18 cells**, each two character columns wide
-and one text row high. Window changes never stretch the world or its glyphs.
-The workbench has a bounded width and stays centered in wider windows; its
-header, metrics and controls share the same outer edges. Narrow tall windows
-place the side panels below the map. Narrow short windows open them through
-**Panels** in the header. Selection and the active cargo tab survive reflow.
+The pinned Client has no public state-loading API. Snapshots therefore record
+seeded command history and replay it into a candidate client, comparing the
+result before replacing the current match. Games must use deterministic moves
+and boardgame.io's seeded random API. Snapshots also check the engine version,
+entry-module fingerprint and player configuration. Imported rule changes need
+a corresponding entry-module version change. Applications do not parse or edit
+these files. Native invalid-move diagnostics remain on stderr.
 
-The minimum canvas is 76 character columns by 30 text rows; its pixel width
-follows the user's font. Smaller viewports clip/scroll the original canvas.
-Native soft wrapping is disabled so clipped rows cannot spill into each other.
-Secondary captions and spacing reduce at short heights; tile dimensions stay
-unchanged.
+### OpenSpiel
+
+`make engine-openspiel GAMEKIT_PYTHON=python3.11` creates a private cache
+environment and installs pinned OpenSpiel. Any Python 3.11+ executable may be
+supplied. `etaf-gamekit-openspiel-python-program` selects a different environment.
+
+A game definition selects `openspiel` with `:game` containing an OpenSpiel game
+specification, plus optional integer `:player` and `:seed` (both default 0).
+Discover the installed native rules with:
+
+```sh
+~/.cache/emacs-taf/game-engines/openspiel/bin/python \
+  native/openspiel/bridge.py --list
+```
+
+The adapter supports sequential and simultaneous rules with explicit chance
+nodes. It samples chance outcomes from a per-instance seeded RNG. Mean-field
+updates and sampled-stochastic kernels require a specialized adapter and are
+rejected explicitly. A catalog entry is not a claim that every game has been
+individually accepted with an ETAF frontend.
+
+Observations include the chosen player's observation string/tensor and
+information state when provided by the kernel, legal action IDs/labels,
+current player, simultaneous/terminal flags, rewards and returns. They contain
+no executable frontend descriptions. The game decides how to turn these
+native facts into its own interface.
+
+| Operation | Arguments |
+| --- | --- |
+| `act` | Integer `:action`, legal for the currently selected active player |
+| `joint-action` | `:actions` vector with one legal action per player |
+| `set-player` | Integer `:player` perspective for local play |
+| `reset` | None; reset the native state and chance seed |
+| `save`, `load` | `:path` to an opaque local snapshot |
+
+Snapshots use OpenSpiel's native game/state serialization and preserve the
+adapter's chance RNG. Loading validates a candidate before changing the running
+instance. The maintained kernel scenarios cover chance and sequential play with
+Kuhn poker, and simultaneous play with the rock-paper-scissors matrix game.
 
 ## Save, recover and close
 
-Save and Load prompt for an explicit local snapshot path. Save publishes the
-file atomically. A snapshot preserves position, cargo, remaining enemies,
-resources, cooldowns, score, elapsed time and recent events. Loading validates
-the snapshot before changing the world and resumes in tactical pause with
-navigation routes cleared. Snapshot bytes are owned by this game version;
-applications should pass paths rather than interpret or modify saved state.
+A game can use the common `save`/`load` operations when advertised by its
+backend. The backend owns snapshot representation and compatibility. The two
+rule-library adapters limit snapshots to 8 MiB and publish files atomically.
+Individual Godot games define their own format and limits. No implicit save is
+performed when an instance closes.
 
-A rejected action or invalid snapshot keeps the connection usable and displays
-its reason. A protocol error, deadline or unexpected process exit marks the
-session failed, preserving the last observation. Reopen the game and load an
-explicit snapshot to recover. Closing, killing or unmounting the game buffer
-releases its process; no implicit save is made. Independent sessions own
-independent game state.
+Rejected actions preserve the usable connection and expose their reason through
+`etaf-gamekit-last-error`. Invalid framing/schema, a deadline or unexpected
+process exit marks the instance failed while retaining its last observation.
+Start a new instance of the same game and restore an explicit snapshot to
+recover. Closing, killing or unmounting its buffer releases the process and
+timers. Closing twice is safe; the caller remains responsible for the buffer.
 
-The startup/action deadline defaults to 15 seconds and is configured by
-`etaf-gamekit-request-timeout`. Up to eight requests may be outstanding, with
-acknowledgments accepted in order. Each request's deadline starts when it is
-sent; a full queue rejects additional calls synchronously. This bounded queue
-preserves short input bursts without accepting unlimited buffered movement.
-Unsolicited frames never clear the latest action rejection. A successful
-acknowledgment clears it.
+## Add a backend adapter
 
-## Adapter contract
-
-Supported callers are Emacs applications using the package entry and external
-processes implementing this protocol. The Emacs caller owns the returned
-session and closes it when finished. The process owns authoritative state.
-Observations and capability lists returned to callers are detached copies;
-mutating them cannot change the process or session state. Full signatures and
-error constraints are in [the entry Commentary](../etaf-gamekit.el).
-
-`etaf-gamekit-start` receives a program/argument list, plus optional `:buffer`,
-`:view` and `:validate` keywords. The view factory receives the session and
-returns an ETAF View. The validator receives a detached observation and must
-return exactly `t`; rejection or a signaled error fails the connection with
-context. Omitting the view factory displays connection status. Omitting the
-validator still enforces the transport envelope and an object observation.
-Programmatic start does not select a window.
+Backend authors register an adapter with a launch function that receives game
+configuration and returns a program/argument list. The framework owns process
+creation and lifetime. Registration adds a backend capability; it does not
+register or open an application.
 
 ```elisp
-(let ((session
-       (etaf-gamekit-start
-        '("my-game-adapter" "--stdio")
-        :validate (lambda (state) (stringp (plist-get state :title)))
-        :view (lambda (game)
-                (etaf-view
-                 (etaf-panel :title "Expedition"
-                   (etaf-label :text (or (etaf-gamekit-view game :title) "Connecting"))
-                   (etaf-label :text (or (etaf-gamekit-last-error game) ""))))))))
-  (display-buffer (etaf-gamekit-buffer session)))
+(etaf-gamekit-register-backend 'my-rules
+  :title "My rule kernel" :features '(turns snapshots)
+  :launch (lambda (options)
+            (list "/path/to/my-rules-adapter"
+                  "--rules" (plist-get options :rules))))
+
+(etaf-gamekit-define-game my-game
+  :title "My Game" :backend 'my-rules
+  :options '(:rules "/path/to/my-game/rules.json")
+  :view #'my-game-view)
 ```
 
-Use `etaf-gamekit-view` inside views and computed values. Its optional top-level
-field argument avoids copying unrelated fields; use value equality on computed
-JSON fields to avoid invalidating unchanged panels. `etaf-gamekit-observation`
-returns the latest accepted state immediately. Unsolicited display publication
-is coalesced to at most 60 Hz; intermediate stream frames may never be painted.
-Acknowledged input publishes on the next Emacs event-loop turn, sharing one
-publication for a response burst. Rendering time and the event loop add to
-these scheduling intervals.
+Registry descriptions are detached metadata. Duplicate registration fails unless
+`:replace t` is explicit. Replacing or unregistering a backend affects future
+game starts, not already running instances. The detailed supported API inventory
+is the [entry Commentary](../etaf-gamekit.el).
 
-Transport uses UTF-8 JSON objects separated by newlines, with at most 1 MiB per
-JSON value. stdout is exclusively protocol data; diagnostic text belongs on
-stderr. Requests contain protocol version 1, a positive increasing integer ID,
-an operation string and an argument object. Emacs arguments use keyword plists
-for objects and vectors for arrays. The first operation is `start`.
+## Adapter wire contract
+
+The process owns authoritative state. UTF-8 JSON objects are separated by
+newlines, with at most 1 MiB per value. stdout is exclusively protocol data;
+diagnostics go to stderr. Requests contain version 1, a positive increasing
+integer ID, operation string and argument object. The first operation is
+`start`; adapters reject repeated starts.
 
 ```json
 {"version":1,"id":1,"op":"start","args":{}}
-{"version":1,"id":2,"op":"navigate","args":{"x":12,"y":3}}
+{"version":1,"id":2,"op":"act","args":{"action":0}}
 ```
 
-Every response includes these fields; additional application state belongs in
-`observation`:
+Every response contains:
 
 ```json
-{"version":1,"id":2,"revision":7,"capabilities":["navigate","save","load"],"observation":{"schema":"my-game/1","title":"Station","entities":[]},"error":null}
+{"version":1,"id":2,"revision":7,"capabilities":["act","save","load"],"observation":{"schema":"my-game/1","score":10},"error":null}
 ```
 
-`revision` is a strictly increasing integer across responses and unsolicited
-observations. An acknowledgment echoes the oldest outstanding request ID;
-an unsolicited observation uses `id: null` and `error: null`. `capabilities` is
-an array of advertised action names. A rejected action echoes its ID, provides
-a nonempty error string and returns the current valid observation. A stale,
-uncorrelated or malformed response fails the connection. EOF means shutdown.
-
+Revisions strictly increase across acknowledgments and unsolicited observations.
+An acknowledgment echoes the oldest outstanding request ID; unsolicited state
+uses `id: null` and `error: null`. Rejections echo their ID with a nonempty error
+string and the current valid observation. Missing fields, stale revisions and
+uncorrelated replies fail the instance. EOF ends the backend's lifetime.
 Decoded objects are keyword plists, arrays are lists, false is `:false`, and
-null is nil. The application chooses its observation schema; there is no
-chess/story/grid enumeration. Observations describe game facts, not ETAF widget
-trees or executable code. A game can include resource IDs in its schema and
-resolve them through its own content manifest to local image/video assets.
-Binary media and frame streams do not belong in these snapshots. The core does
-not download assets, schedule animation or mix audio.
+null is nil. The observation schema belongs to the game or its chosen adapter.
 
-## Use the Godot bridge
+## Salvage Station example
 
-`etaf-gamekit-open-godot` accepts a directory containing `project.godot` and the
-same presentation/validation keywords as `start`. It starts the configured
-Godot executable with `--headless --no-header` and the shared bridge in
-`native/godot/gamekit.gd`. Games do not implement stdin readers or transport.
+Salvage Station is a standalone GameKit application with a headless Godot
+simulation and a native ETAF interface. The application owns its rules, theme,
+components and launch command; it uses only public GameKit, ETAF and catalog
+APIs.
 
-Set `gamekit/game_script` in the project to a script that extends Node or Node2D.
-The bridge creates it as a child of the scene root. The script supplies:
-
-- `capabilities() -> Array`: currently advertised action names.
-- `command(operation: String, args: Dictionary) -> String`: apply a valid action;
-  return an empty string on success or an explanatory rejection without partial mutation.
-- `observe() -> Dictionary`: a complete, JSON-serializable observation of current state.
-
-The bridge handles `start` itself. Game methods and simulation run on Godot's
-main thread; a separate worker reads stdin. It emits acknowledged observations
-immediately after commands and changed unsolicited observations at up to 20 Hz.
-Closing stdin stops the runtime. Game scripts must keep stdout free of other
-messages and use stderr for diagnostics.
-
-A minimal project can contain:
-
-```ini
-; project.godot
-config_version=5
-[application]
-config/name="Counter"
-[gamekit]
-game_script="res://game.gd"
-```
-
-```gdscript
-# game.gd
-extends Node
-var count := 0
-func capabilities() -> Array:
-    return ["increment"]
-func command(operation: String, _args: Dictionary) -> String:
-    if operation != "increment":
-        return "Unsupported action"
-    count += 1
-    return ""
-func observe() -> Dictionary:
-    return {"schema": "counter/1", "count": count}
-```
+Install GameKit, ETAF, etaf-ui and the [Godot backend](#godot), then add the
+application directory to `load-path`:
 
 ```elisp
-(etaf-gamekit-open-godot
- "/path/to/counter"
- :view (lambda (game)
-         (etaf-view
-          (etaf-panel :title "Counter"
-            (etaf-label :text (format "%s" (or (etaf-gamekit-view game :count) 0)))
-            (etaf-button :label "Increment"
-              :disabled (memq (etaf-gamekit-status game) '(starting failed closed))
-              :on-press (lambda () (etaf-gamekit-action game "increment")))))))
+(add-to-list 'load-path "/path/to/etaf-gamekit/examples/salvage")
+(require 'salvage)
+(salvage-open)
 ```
 
-Salvage Station is the complete example of this contract. Its game project is
-in `examples/salvage`, and its ETAF composition is loaded by the package entry.
-Other engines need the same wire envelope, not a Godot dependency. Backend
-selection and media boundaries are explained in [architecture](architecture.md).
+`salvage-game` is a game definition. `salvage-open` starts an independent
+instance, displays its buffer and fits the view to its window. The same
+application directory can be used outside the framework repository; its Godot
+project is resolved relative to its own entry file. The application's
+[entry Commentary](../examples/salvage/salvage.el) describes its public API.
 
-## Validation and latency
+Recover three power cores from the station and return to the extraction dock.
+The game starts in tactical pause. Godot owns movement, collision, pathfinding,
+drones, energy, damage, score and victory/defeat. ETAF owns selection, tabs,
+dialogs and all presentation.
 
-`make check` runs structure/API validation, byte compilation, public session and
-UI scenarios, and real Godot protocol/game scenarios. The latter play through
-recovery and extraction rather than replacing the runtime with a fake engine.
-Transport failure cases use a controlled external peer.
+| Input | Action |
+| --- | --- |
+| P / Launch / Pause | Start or pause simulation |
+| W A S D | Extend the navigation destination by one cardinal tile |
+| Click deck | Plot a route around bulkheads |
+| Click an object | Inspect it; use Plot route to target to navigate there |
+| 1 / EMP | Disable drones within five tiles; costs 20 energy, four-second cooldown |
+| 2 / Shield | Protect the hull for five seconds; costs 25 energy |
+| Cargo → Repair | Use one of two kits to restore up to 40 hull |
+| F1 / Help | Open the flight manual |
+| Save / Load | Choose an explicit local snapshot path |
 
-From the workspace root, select the package's maintained performance adapter:
+Loading validates a snapshot before changing the world, resumes paused and
+clears navigation routes. Snapshots retain position, cargo, enemies, resources,
+cooldowns, score, elapsed time and events. Closing makes no implicit save.
+
+The map stays 32×18 cells, each two character columns by one text row. Resizing
+reflows surrounding panels without stretching the world. Narrow tall windows
+put panels below the map; narrow short windows expose them through **Panels**.
+The minimum canvas is 76 character columns by 30 rows. Smaller windows clip or
+scroll that canvas with soft wrapping disabled.
+
+For GUI acceptance, load ETAF's `scripts/emacs-gui-verifier.el` and GameKit's
+`scripts/etaf-gamekit-gui-scenarios.el` into a dedicated graphical Emacs using
+these checkouts. Schedule `etaf-gamekit-gui-run` with a fresh evidence directory.
+It checks the complete expedition, native keys, fixed map dimensions, panels,
+width/height adaptation and restart, then restores frame geometry. Inspect its
+screenshots; functional assertions alone do not certify appearance.
+
+## Validate framework changes
+
+`make check` runs structure/API validation, compilation, game-definition and
+lifetime scenarios, native library transitions and snapshot recovery. The
+controlled protocol peer exercises malformed input, queue bounds and failure;
+boardgame.io and OpenSpiel scenarios use the actual installed kernels.
+
+The framework's transport workloads use the shared workspace performance driver:
 
 ```sh
 python3 scripts/performance.py run --mode batch \
   --scenario-file etaf-gamekit/benchmarks/performance-scenarios.el \
-  --load-path etaf-gamekit --scenario '^etaf-gamekit\.' \
+  --load-path etaf-gamekit --scenario 'etaf-gamekit.grid.*' \
   --sets 3 --samples 30 --warmups 5
 ```
 
-It covers 80×24 text surfaces at several change densities and stream rates,
-object inspection, a click through Godot pathfinding to a painted route, and
-complete-game viewport refitting with fixed cell dimensions. Scenario budgets are targets, not measured
-claims: 16 ms for local selection and 50 ms for backend route or full refit.
-Use the workspace [performance workflow](https://forgejo.vhkd.top/emacs-taf/emacs-taf/src/branch/main/docs/manual.md) for independent
-sample sets, comparisons and GUI validation. Batch results and background GUI
-redisplay do not establish foreground OS input latency.
+Select `etaf-gamekit.kernel.*` with the same command for native boardgame.io and
+OpenSpiel action-to-publication workloads. Each action must reach the backend,
+be acknowledged and appear in the game-owned view; the 16.67 ms budget is an
+acceptance target, not a measured claim.
 
-The maintained visual scenario in `scripts/etaf-gamekit-gui-scenarios.el`
-uses ETAF's shared GUI verifier. In a graphical Emacs that already loads this
-checkout, load the verifier and scenario adapter, then schedule the run with a
-fresh evidence directory:
-
-```elisp
-(load "/path/to/etaf/scripts/emacs-gui-verifier.el" nil t t)
-(load "/path/to/etaf-gamekit/scripts/etaf-gamekit-gui-scenarios.el" nil t t)
-(run-at-time 0 nil #'etaf-gamekit-gui-run "/tmp/salvage-gui-evidence")
-```
-
-The scenario checks wide, ordinary, compact, short and tall layouts, fixed cell
-metrics, minimum clipping, native movement, panels, object inspection, Help,
-extraction and restart. It restores the frame dimensions and leaves the game
-paused. Use a dedicated validation frame when changing the current layout would
-interrupt other work. The shared verifier preserves application focus and writes
-`result.json` plus window screenshots. Inspect those images before accepting
-appearance; a passing result alone certifies only the functional assertions.
+The maintained Salvage integration workloads and GUI adapter remain separate
+acceptance surfaces. See the [example](#salvage-station-example). Batch and
+background GUI measurements do not certify foreground OS input latency.

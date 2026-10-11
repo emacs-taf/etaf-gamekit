@@ -19,3 +19,4 @@ native/core/target/
 # Godot import cache and generated resource identities.
 .godot/
 *.gd.uid
+node_modules/

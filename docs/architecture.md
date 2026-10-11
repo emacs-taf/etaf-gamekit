@@ -1,92 +1,122 @@
 # Architecture
 
-GameKit separates an authoritative game kernel from native ETAF presentation.
-The session contract transports commands and observations; it does not prescribe
-boards, stories, widgets or a universal world model. Each application defines a
-versioned observation schema and composes its own interface through ETAF and
-etaf-ui. The [manual](manual.md#adapter-contract) owns the wire contract.
+GameKit is a framework consumed by game applications. Its public starting point
+is a game definition, followed by an independent running instance. Backends are
+replaceable providers beneath that application contract.
 
-## Ownership and data flow
+## Responsibilities
 
-The external process owns rules, simulation time, saved state and action
-validation. The Emacs session owns transport, request correlation, observation
-validation and buffer lifetime. The application owns presentation, selection,
-open panels and unsent input. Observations are detached values, not writable
-references into authoritative game state.
+| Owner | Responsibility |
+| --- | --- |
+| Game application | Game identity, rules/content, assets, ETAF views, local interaction state and launch command |
+| Game definition | Inert binding of identity, backend configuration, view factory and observation validator |
+| Game instance | Process ownership, ordered actions, state publication, errors and mounted-view lifetime |
+| Backend adapter | Translate game configuration and native kernel operations into the common wire contract |
+| Native kernel | Authoritative rules, simulation or turns, legal actions and saved-state semantics |
+| ETAF and etaf-ui | General rendering/reactivity/input and optional catalog components used by the application |
 
-Accepted observations update the session immediately. Unsolicited publication
-is coalesced to at most sixty updates per second; intermediate frames may be
-skipped. Acknowledged input is published on the next Emacs event-loop turn,
-without waiting for the stream interval; a burst still shares one publication. Value equality prevents unchanged observation fields from
-invalidating unrelated panels. Transport failure preserves the last accepted
-observation and its error; closing or unmounting a session releases its process.
+```mermaid
+flowchart LR
+    A[Game application] --> D[Game definition]
+    D --> I[Independent game instance]
+    I <--> B[Backend adapter]
+    B <--> K[Native rule or simulation kernel]
+    I -->|observations| V[Application-owned ETAF view]
+    V -->|actions| I
+```
 
-Salvage Station uses Godot's physics bodies, collision detection, fixed physics
-steps and AStarGrid2D pathfinding. Game-specific rules, observation projection
-and snapshots live in its game script. The shared Godot bridge supplies stdin
-handling, ordered requests and changed-state publication at up to 20 Hz. It
-opens no rendering window. All map cells, status panels, controls, dialogs and
-input belong to ETAF. There is no video-frame transport in this path.
+The framework has no application launcher, game menu, theme or game-specific
+view. Requiring its entry loads ETAF and the generic framework modules only.
+It does not load etaf-ui or anything under `examples/`. Applications require the
+catalog when they need it. A separate game repository uses the same public API
+as the [Salvage application](manual.md#salvage-station-example).
 
-TileGrid owns reusable coordinate activation and intrinsic cell metrics.
-Window adaptation reflows the surrounding panels without stretching the game
-world. TextGrid supplies retained character rows for dense passive surfaces and the
-transport benchmark. Neither catalog component owns game rules or backend
-state. The application only calls public ETAF and etaf-ui interfaces; Ebox
-remains behind ETAF.
+## Definition and instance lifetime
 
-## Backend selection
+Defining a game starts no process and mounts no view. Its configuration is
+validated and detached from caller-owned values. Starting that definition
+creates a new instance and overlays per-instance options onto a fresh copy.
+The game name and title are available before the first view is constructed.
+Definitions can be reused; no authoritative game state is shared between starts.
 
-One transport protocol does not require one runtime for every game. A backend
-must expose validated actions and a useful observation projection, have clear
-lifetime ownership, and define save/restore behavior when it advertises it.
-Serialization alone is insufficient: a save blob may be opaque and cannot
-substitute for the observation needed by a rich frontend.
+The registry belongs to backend authors. A launch function prepares a command
+from game configuration; the instance owns starting, communicating with and
+closing that process. Replacing or unregistering a backend affects future
+starts. Existing instances retain their process, game metadata and lifetime.
 
-| Workload | Selection | Integration status |
-| --- | --- | --- |
-| Real-time worlds with collision, navigation and simulation | Godot in headless mode | Included bridge and maintained Salvage Station game |
-| Turn-based cards, tabletop and multiplayer phases | boardgame.io is the preferred candidate for a concrete tabletop application | No adapter or dependency installed |
-| Established chess, Go, shogi or mahjong rules and strong search | The game's native protocol/kernel, such as UCI, GTP, USI or mjai | Select and adapt only with a maintained game |
-| Broad rules/AI experiments | OpenSpiel | Candidate library, not the default runtime |
-| Existing portable puzzles | Simon Tatham's collection | Requires adapting its frontend/drawing contract; not automatically high-level JSON state |
-| Persistent text worlds, roguelikes or branching narrative | Evennia, non-rendering rot.js/tcod facilities, or Ink as appropriate | Optional specialized candidates |
-| Panel-heavy management games with small rule sets | A separate pure application state kernel | Can remain in-process; persistence may use ETAF DB without requiring GameKit transport |
+The instance's mount owns the presentation lifetime. Killing or unmounting its
+buffer closes the backend, cancels pending work and prevents later publication.
+Transport failure retains the last accepted observation and explanatory error.
+Snapshots are explicit and backend-owned; closing never implies a save.
+The [manual](manual.md#adapter-wire-contract) owns framing, ordering and errors.
 
-Godot is retained because its [headless mode](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_dedicated_servers.html)
-works without a display and its [navigation](https://docs.godotengine.org/en/stable/classes/class_astargrid2d.html)
-and [physics bodies](https://docs.godotengine.org/en/stable/classes/class_characterbody2d.html)
-are useful independently of rendering. A general runtime still requires game
-rules and an observation projection. The same is true of a framework such as
-[boardgame.io](https://boardgame.io/), which provides state management, turns,
-phases and multiplayer rather than supplying every game's rules.
+## State and presentation
 
-The broader candidates are not interchangeable packages of ready-made rich
-interfaces. [OpenSpiel serialization](https://github.com/google-deepmind/open_spiel/blob/master/docs/api_reference/game_serialize_game_and_state.md)
-is an engine serialization string, not a common JSON observation schema.
+The kernel is the only authority for rules and world state. Applications own
+selection, dialogs and other presentation state. Detached observations flow
+through reactive values, with unchanged values retained by equality. Streams
+coalesce to at most sixty publications per second; acknowledged actions publish
+on the next event-loop turn. The view may skip intermediate observations but
+always has access to the latest accepted one.
+
+No universal board, story or world schema is imposed. A game supplies a schema
+or uses its adapter's documented native projection. Asset IDs resolve through
+the game's content manifest; binary media and rendered frames stay outside the
+state protocol. Applications compose ETAF image/video facilities and optional
+etaf-ui media components. GameKit currently supplies no asset downloader, audio
+mixer or network synchronization service.
+
+Intrinsic world/tile dimensions belong to the game's presentation design.
+Window adaptation reflows surrounding controls and panels without stretching
+the world. Reusable primitives stay in their owning ETAF/UI providers, rather
+than being copied into either GameKit or applications.
+
+## Included native adapters
+
+Godot supplies a simulation runtime. Its shared bridge owns stdin, correlation
+and changed-state publication. A game project supplies commands and observations
+while using Godot's physics, collision, navigation and simulation APIs. The
+bridge runs [headlessly](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_dedicated_servers.html);
+there is no game-rendering window or video-frame transport. GameKit does not
+contain that project's rules or UI.
+
+The boardgame.io adapter consumes an application-owned Game module through the
+[public Client API](https://github.com/boardgameio/boardgame.io/blob/v0.50.2/docs/documentation/api/Client.md).
+The library owns turns, phases, player views, move validation and random state.
+The included path is a local match. Its pinned release lacks public state
+loading, so an opaque snapshot replays seeded commands into a candidate client
+and verifies the resulting observation before replacing the live match. It
+never dispatches private Redux actions or changes library internals.
+
+OpenSpiel supplies existing rule kernels. The adapter uses its public state,
+legal-action, chance, joint-action and native serialization APIs. It preserves
+the chosen player's observation and information-state boundaries rather than
+publishing an unfiltered native state. Explicit chance is resolved by an owned
+seeded RNG. Native snapshot restoration and RNG validation occur before the
+live state changes. Mean-field and sampled-stochastic games need specialized
+adapters. Discovering a native game name does not certify its frontend or all
+of its lifecycle paths.
+
+## Engine selection boundaries
+
+| Need | Provider and status |
+| --- | --- |
+| Real-time physics, collision and navigation | Included Godot backend; applications supply game projects |
+| Application-defined tabletop/card rules, turns and phases | Included boardgame.io backend; local matches, player views and replay snapshots |
+| Existing rules with legal-action APIs and native snapshots | Included OpenSpiel backend; sequential/simultaneous kernels with explicit chance |
+| Strong chess, Go, shogi or mahjong rules/search | UCI, GTP, USI or mjai providers belong in specialized backend plugins; none is installed implicitly |
+| Existing portable puzzle rules | Tatham's collection needs an adapter for its frontend/drawing contract, not just a serialization wrapper |
+| Persistent worlds, roguelike utilities or branching narrative | Evennia, non-rendering rot.js/tcod facilities, Ink or other providers can implement a backend plugin |
+| Small in-process management rules | A game can use ETAF and its own pure state kernel directly; the current GameKit backend transport is process-based |
+
+A shared game-authoring and instance contract does not make native kernels
+interchangeable. Games still select the provider that owns the required rules
+or simulation. Backend features describe capabilities; active observations and
+native validation determine whether an action is legal now.
+
+Godot's supported headless APIs provide a usable non-rendering simulation path.
+[OpenSpiel serialization](https://github.com/google-deepmind/open_spiel/blob/master/docs/api_reference/game_serialize_game_and_state.md)
+is not a universal JSON world model, and
 [Tatham's collection](https://www.chiark.greenend.org.uk/~sgtatham/puzzles/)
-contains dozens of puzzle types and has a portable frontend/backend design;
-its drawing interface still needs an ETAF-specific presentation decision.
-Neither breadth nor headless support justifies installing an unused adapter.
-
-## Rich presentation and assets
-
-The session accepts any JSON observation object validated by the application.
-It has no chess/story/grid type union. Applications can expose entities, hands,
-events, inventories, timelines and resource IDs in their own schema. A resource
-ID should resolve through the application's content manifest to a local asset
-or explicit media source; simulation state should not contain image bytes,
-rendered frames or executable UI descriptions.
-
-Applications may compose ETAF's public image/video facilities and etaf-ui's
-media viewer with the same observation API. GameKit does not yet provide asset
-acquisition, animation scheduling, audio mixing or network synchronization.
-Those capabilities must have a concrete consuming game and acceptance tests
-before they become shared services. Salvage Station currently uses themed
-native cells and panels and needs no downloaded art assets.
-
-The maintained acceptance priority is a complete real-time game: authoritative
-simulation, rich native controls, width/height adaptation, save recovery and
-measured input-to-display latency. A tabletop adapter follows only when a
-concrete game exercises additional requirements. This keeps the core independent
-of any engine while making the included path complete and reproducible.
+contains dozens of puzzle types with a drawing interface. The framework exposes
+these boundaries without pretending every provider produces the same game UI.

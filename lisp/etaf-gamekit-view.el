@@ -3,8 +3,7 @@
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;; Code:
-(require 'etaf-ui)
-(require 'etaf-gamekit-session)
+(require 'etaf-gamekit-game)
 
 (etaf-define-component etaf-gamekit--root (&key session)
   :setup (progn (etaf-on-unmounted (lambda () (etaf-gamekit-close session))) nil)
@@ -13,9 +12,10 @@
    (if (etaf-gamekit--session-presentation session)
        (funcall (etaf-gamekit--session-presentation session) session)
      (etaf-view
-      (etaf-panel :title "Game session"
-        (etaf-label :text (symbol-name (etaf-gamekit-status session)))
-        (etaf-label :text (or (etaf-gamekit-last-error session) "Connected through GameKit")))))))
+      (column :role 'region
+        (text (expr (plist-get (etaf-gamekit-game-info session) :title)))
+        (text (expr (symbol-name (etaf-gamekit-status session))))
+        (text (expr (or (etaf-gamekit-last-error session) ""))))))))
 
 (defun etaf-gamekit--mount (session)
   "Mount SESSION's presentation with an owned lifetime boundary."

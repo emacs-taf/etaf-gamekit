@@ -1,15 +1,34 @@
 ;;; -*- lexical-binding: t; -*-
-;;; etaf-gamekit-salvage.el --- Salvage Station's native application
+;;; salvage.el --- Salvage Station's native application
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "29.1") (etaf-gamekit "0.1.0") (etaf-ui "0.1.0"))
+;;; Commentary:
+;; A standalone example application built with the GameKit public API.
+;; Add this directory to load-path, require salvage, and call salvage-open.
+;;
+;; Variable: salvage-game
+;; The Salvage Station game definition, usable with etaf-gamekit-start.
+;; Each start owns a separate Godot world and native ETAF presentation.
+;;
+;; Function: salvage-open ()
+;;;###autoload (autoload 'salvage-open "salvage" nil t)
+;; Start and display an independent Salvage Station expedition; return its
+;; GameKit instance. The game starts paused; no snapshot is restored implicitly.
+;;
 ;;; Code:
+(require 'etaf-gamekit)
 (require 'etaf-ui)
 (declare-function etaf-gamekit-view "etaf-gamekit" (session &optional field))
 (declare-function etaf-gamekit-status "etaf-gamekit" (session))
 (declare-function etaf-gamekit-last-error "etaf-gamekit" (session))
 (declare-function etaf-gamekit-action "etaf-gamekit" (session operation &optional arguments))
 
-(defconst etaf-gamekit--salvage-theme
+(defconst salvage--directory
+  (file-name-directory (or load-file-name buffer-file-name)))
+
+(defconst salvage--theme
   '(:ui-fg "#DBE8F5" :ui-bg "#091522" :ui-muted-fg "#8196AD"
     :ui-border "#2A4258" :ui-panel-fg "#DBE8F5" :ui-panel-bg "#0F2032"
     :ui-panel-border "#2A4258" :ui-accent "#66E0D3" :ui-accent-fg "#08242B"
@@ -32,24 +51,24 @@
     :salvage-selected-bg "#375C73")
   "Scoped semantic palette for the game; it does not alter the Emacs theme.")
 
-(defun etaf-gamekit--salvage-object-p (value)
+(defun salvage--object-p (value)
   "Whether VALUE is a decoded JSON object."
   (and (proper-list-p value) (zerop (% (length value) 2))
        (cl-loop for (key _value) on value by #'cddr always (keywordp key))))
 
-(defun etaf-gamekit--salvage-integer-p (value minimum maximum)
+(defun salvage--integer-p (value minimum maximum)
   "Whether VALUE is an integer in the inclusive bounds."
   (and (integerp value) (<= minimum value maximum)))
 
-(defun etaf-gamekit--salvage-valid-p (view)
+(defun salvage--valid-p (view)
   "Validate the game's observation before publishing it."
-  (and (etaf-gamekit--salvage-object-p view)
+  (and (salvage--object-p view)
        (equal (plist-get view :schema) "salvage/1")
        (let ((world (plist-get view :world)) (pilot (plist-get view :pilot))
              (mission (plist-get view :mission)) (events (plist-get view :events)))
-         (and (etaf-gamekit--salvage-object-p world)
-              (etaf-gamekit--salvage-object-p pilot)
-              (etaf-gamekit--salvage-object-p mission)
+         (and (salvage--object-p world)
+              (salvage--object-p pilot)
+              (salvage--object-p mission)
               (equal (plist-get world :width) 32) (equal (plist-get world :height) 18)
               (proper-list-p (plist-get world :terrain))
               (= (length (plist-get world :terrain)) 18)
@@ -59,54 +78,54 @@
               (consp (plist-get world :entities))
               (proper-list-p (plist-get world :entities))
               (cl-every (lambda (entity)
-                          (and (etaf-gamekit--salvage-object-p entity)
+                          (and (salvage--object-p entity)
                                (stringp (plist-get entity :id)) (stringp (plist-get entity :name))
                                (member (plist-get entity :kind) '("pilot" "drone" "core" "dock"))
-                               (etaf-gamekit--salvage-integer-p (plist-get entity :x) 0 31)
-                               (etaf-gamekit--salvage-integer-p (plist-get entity :y) 0 17)))
+                               (salvage--integer-p (plist-get entity :x) 0 31)
+                               (salvage--integer-p (plist-get entity :y) 0 17)))
                         (plist-get world :entities))
               (proper-list-p (plist-get world :route))
               (cl-every (lambda (cell)
                           (and (proper-list-p cell) (= (length cell) 2)
-                               (etaf-gamekit--salvage-integer-p (car cell) 0 31)
-                               (etaf-gamekit--salvage-integer-p (cadr cell) 0 17)))
+                               (salvage--integer-p (car cell) 0 31)
+                               (salvage--integer-p (cadr cell) 0 17)))
                         (plist-get world :route))
               (cl-every (lambda (key) (memq (plist-get world key) '(t :false))) '(:pulse :shield))
               (cl-every (lambda (pair)
-                          (etaf-gamekit--salvage-integer-p (plist-get pilot (car pair)) 0 (cdr pair)))
+                          (salvage--integer-p (plist-get pilot (car pair)) 0 (cdr pair)))
                         '((:health . 100) (:energy . 100) (:repairs . 2) (:cores . 3)
                           (:score . 975) (:pulse_cooldown . 4) (:shield_remaining . 5)))
               (cl-every (lambda (key) (memq (plist-get mission key) '(t :false))) '(:paused :won :lost))
-              (etaf-gamekit--salvage-integer-p (plist-get mission :seconds) 0 most-positive-fixnum)
-              (etaf-gamekit--salvage-integer-p (plist-get mission :drones) 0 3)
+              (salvage--integer-p (plist-get mission :seconds) 0 most-positive-fixnum)
+              (salvage--integer-p (plist-get mission :drones) 0 3)
               (proper-list-p events) (<= (length events) 12)
               (cl-every (lambda (event)
-                          (and (etaf-gamekit--salvage-object-p event)
-                               (etaf-gamekit--salvage-integer-p (plist-get event :id) 1 most-positive-fixnum)
-                               (etaf-gamekit--salvage-integer-p (plist-get event :time) 0 most-positive-fixnum)
+                          (and (salvage--object-p event)
+                               (salvage--integer-p (plist-get event :id) 1 most-positive-fixnum)
+                               (salvage--integer-p (plist-get event :time) 0 most-positive-fixnum)
                                (stringp (plist-get event :title)) (stringp (plist-get event :detail))
                                (member (plist-get event :kind) '("info" "success" "danger")))) events)
               t))))
 
-(defun etaf-gamekit--salvage-act (session operation &optional args)
+(defun salvage--act (session operation &optional args)
   "Send one game OPERATION through the bounded session queue."
   (when (memq (etaf-gamekit-status session) '(ready busy))
     (etaf-gamekit-action session operation args)))
 
-(defun etaf-gamekit--salvage-file (session operation)
+(defun salvage--file (session operation)
   "Choose a local expedition snapshot for OPERATION."
   (when-let* ((path (etaf-call-with-input
                     (lambda () (read-file-name (concat (capitalize operation) " expedition: ")
                                                nil nil (equal operation "load") "salvage.json")))))
-    (etaf-gamekit--salvage-act session operation (list :path (expand-file-name path)))))
+    (salvage--act session operation (list :path (expand-file-name path)))))
 
-(defun etaf-gamekit--salvage-entity (world row column)
+(defun salvage--entity (world row column)
   "Find the visible object at ROW/COLUMN in WORLD."
   (cl-find-if (lambda (entity) (and (= column (plist-get entity :x))
                                    (= row (plist-get entity :y))))
               (plist-get world :entities)))
 
-(defun etaf-gamekit--salvage-index (items entity-p)
+(defun salvage--index (items entity-p)
   "Index display ITEMS by coordinate; ENTITY-P selects entity records."
   (let ((cells (make-vector (* 32 18) nil)))
     (dolist (item items)
@@ -115,7 +134,7 @@
         (unless (aref cells index) (aset cells index (if entity-p item t)))))
     cells))
 
-(defun etaf-gamekit--salvage-tile (terrain entities route selected row column part)
+(defun salvage--tile (terrain entities route selected row column part)
   "Resolve PART from indexed display facts at ROW/COLUMN."
   (let* ((index (+ (* row 32) column))
          (entity (aref (etaf-value entities) index))
@@ -141,28 +160,28 @@
            ((aref (etaf-value route) index) :salvage-route-fg)
            (t :salvage-deck-fg)))))))
 
-(etaf-define-component etaf-gamekit--salvage-deck (&key session selected)
+(etaf-define-component salvage--deck (&key session selected)
   :bindings ((world (etaf-computed (lambda () (etaf-gamekit-view session :world)) :test #'equal))
              (terrain (etaf-computed (lambda () (plist-get (etaf-value world) :terrain)) :test #'equal))
              (entities (etaf-computed
-                        (lambda () (etaf-gamekit--salvage-index (plist-get (etaf-value world) :entities) t)) :test #'equal))
+                        (lambda () (salvage--index (plist-get (etaf-value world) :entities) t)) :test #'equal))
              (route (etaf-computed
-                     (lambda () (etaf-gamekit--salvage-index (plist-get (etaf-value world) :route) nil)) :test #'equal)))
+                     (lambda () (salvage--index (plist-get (etaf-value world) :route) nil)) :test #'equal)))
   :view
   (etaf-tile-grid :rows 18 :columns 32 :cell-width 2 :ref 'salvage-map
     :cell-ref (lambda (r c) (intern (format "salvage-tile-%d-%d" r c)))
-    :cell-text (lambda (r c) (etaf-gamekit--salvage-tile terrain entities route selected r c 'text))
-    :cell-color (lambda (r c) (etaf-gamekit--salvage-tile terrain entities route selected r c 'color))
-    :cell-background (lambda (r c) (etaf-gamekit--salvage-tile terrain entities route selected r c 'background))
-    :cell-label (lambda (r c) (etaf-gamekit--salvage-tile terrain entities route selected r c 'label))
+    :cell-text (lambda (r c) (salvage--tile terrain entities route selected r c 'text))
+    :cell-color (lambda (r c) (salvage--tile terrain entities route selected r c 'color))
+    :cell-background (lambda (r c) (salvage--tile terrain entities route selected r c 'background))
+    :cell-label (lambda (r c) (salvage--tile terrain entities route selected r c 'label))
     :on-cell-press
     (lambda (r c)
-      (let* ((data (etaf-value world)) (entity (etaf-gamekit--salvage-entity data r c)))
+      (let* ((data (etaf-value world)) (entity (salvage--entity data r c)))
         (if entity (setf (etaf-value selected) (plist-get entity :id))
           (unless (= (aref (nth r (plist-get data :terrain)) c) ?#)
-            (etaf-gamekit--salvage-act session "navigate" (list :x c :y r))))))))
+            (salvage--act session "navigate" (list :x c :y r))))))))
 
-(etaf-define-component etaf-gamekit--salvage-map (&key session selected compact narrow)
+(etaf-define-component salvage--map (&key session selected compact narrow)
   :view
   (etaf-panel :title "01 / STATION DECK" :ref 'salvage-map-panel :width '(ch 70) :padding '((lh 1) (ch 2))
               :item-gap (if compact '(lh 0) '(lh 1))
@@ -170,7 +189,7 @@
       (etaf-label :text "SECTOR 07     Derelict research station" :variant 'muted)
       (etaf-tag :text "32 × 18" :variant 'info))
     (flex :width 'stretch :justify-content 'center
-      (etaf-gamekit--salvage-deck :session session :selected selected))
+      (salvage--deck :session session :selected selected))
     (row :item-gap (if narrow '(ch 1) '(ch 3))
       (etaf-label :text (if narrow "◉ YOU" "◉ SURVEYOR") :color "#6CE4D4")
       (etaf-label :text "▲ DRONE" :color "#FF8C9D")
@@ -178,7 +197,7 @@
       (etaf-label :text (if narrow "▣ DOCK" "▣ EXTRACTION") :color "#83E5C5"))
     (etaf-label :if (and (not compact) (not narrow)) :text "Click deck to plot a route · Select an object to inspect it" :variant 'muted)))
 
-(etaf-define-component etaf-gamekit--salvage-metrics (&key session compact narrow)
+(etaf-define-component salvage--metrics (&key session compact narrow)
   :bindings ((pilot (etaf-computed (lambda () (etaf-gamekit-view session :pilot)) :test #'equal))
              (mission (etaf-computed (lambda () (etaf-gamekit-view session :mission)) :test #'equal)))
   :view
@@ -199,7 +218,7 @@
         (etaf-label :text (format "%02d:%02d" (/ (plist-get (etaf-value mission) :seconds) 60)
                                  (% (plist-get (etaf-value mission) :seconds) 60)) :variant 'strong)))))
 
-(etaf-define-component etaf-gamekit--salvage-inspector (&key session selected compact)
+(etaf-define-component salvage--inspector (&key session selected compact)
   :bindings ((mission (etaf-computed (lambda () (etaf-gamekit-view session :mission)) :test #'equal))
              (world (etaf-computed (lambda () (etaf-gamekit-view session :world)) :test #'equal))
              (entity (etaf-computed
@@ -229,10 +248,10 @@
                                (eq t (plist-get (etaf-value mission) :lost)))
                  :on-press (lambda ()
                              (let ((target (etaf-value entity)))
-                               (etaf-gamekit--salvage-act session "navigate"
+                               (salvage--act session "navigate"
                                  (list :x (plist-get target :x) :y (plist-get target :y))))))))
 
-(etaf-define-component etaf-gamekit--salvage-cargo (&key session compact active)
+(etaf-define-component salvage--cargo (&key session compact active)
   :bindings ((mission (etaf-computed (lambda () (etaf-gamekit-view session :mission)) :test #'equal))
              (pilot (etaf-computed (lambda () (etaf-gamekit-view session :pilot)) :test #'equal))
              (tab (or active (etaf-ref "cargo"))))
@@ -256,7 +275,7 @@
                                  (<= (plist-get (etaf-value pilot) :repairs) 0)
                                  (<= (plist-get (etaf-value pilot) :health) 0)
                                  (>= (plist-get (etaf-value pilot) :health) 100))
-                   :on-press (lambda () (etaf-gamekit--salvage-act session "repair"))))
+                   :on-press (lambda () (salvage--act session "repair"))))
     (column :if (equal (etaf-value tab) "mission") :item-gap '(lh 1)
       (etaf-label :text (format "%s Recover three power cores"
                                 (if (= (plist-get (etaf-value pilot) :cores) 3) "✓" "○")))
@@ -268,7 +287,7 @@
       (etaf-label :text "SALVAGE SCORE" :variant 'muted)
       (etaf-label :text (format "%04d" (plist-get (etaf-value pilot) :score)) :variant 'strong))))
 
-(etaf-define-component etaf-gamekit--salvage-commands (&key session narrow)
+(etaf-define-component salvage--commands (&key session narrow)
   :bindings ((pilot (etaf-computed (lambda () (etaf-gamekit-view session :pilot)) :test #'equal))
              (mission (etaf-computed (lambda () (etaf-gamekit-view session :mission)) :test #'equal))
              (ended (etaf-computed (lambda () (or (eq t (plist-get (etaf-value mission) :won))
@@ -280,12 +299,12 @@
         :text (if (eq t (plist-get (etaf-value mission) :won))
                   "EXTRACTION COMPLETE · All cores secured" "EXPEDITION LOST · Surveyor signal lost"))
       (etaf-button :label "Start a new expedition" :ref 'salvage-new-expedition
-        :on-press (lambda () (etaf-gamekit--salvage-act session "restart"))))
+        :on-press (lambda () (salvage--act session "restart"))))
     (flex :if (not (etaf-value ended)) :justify-content 'space-between :width 'stretch :gap '((lh 0) (ch 2))
       (row :item-gap '(ch 2)
         (etaf-button :label (if (eq t (plist-get (etaf-value mission) :paused)) "P  LAUNCH" "P  PAUSE")
                      :ref 'salvage-pause :width '(ch 19)
-                     :on-press (lambda () (etaf-gamekit--salvage-act session "pause")))
+                     :on-press (lambda () (salvage--act session "pause")))
         (etaf-button :label (if (> (plist-get (etaf-value pilot) :pulse_cooldown) 0)
                                 (format "1  EMP · %ds" (plist-get (etaf-value pilot) :pulse_cooldown)) "1  EMP PULSE")
                      :help-echo "20 energy · Disables drones within five tiles"
@@ -293,14 +312,14 @@
                      :disabled (or (eq t (plist-get (etaf-value mission) :paused))
                                    (> (plist-get (etaf-value pilot) :pulse_cooldown) 0)
                                    (< (plist-get (etaf-value pilot) :energy) 20))
-                     :on-press (lambda () (etaf-gamekit--salvage-act session "pulse")))
+                     :on-press (lambda () (salvage--act session "pulse")))
         (etaf-button :label "2  SHIELD" :ref 'salvage-shield :variant 'secondary
                      :help-echo "25 energy · Protects the hull for five seconds"
                      :width '(ch 19) :disabled (< (plist-get (etaf-value pilot) :energy) 25)
-                     :on-press (lambda () (etaf-gamekit--salvage-act session "shield"))))
+                     :on-press (lambda () (salvage--act session "shield"))))
       (etaf-label :if (not narrow) :text "W A S D · MOVE" :variant 'muted))))
 
-(etaf-define-component etaf-gamekit--salvage-log (&key session compact)
+(etaf-define-component salvage--log (&key session compact)
   :bindings ((events (etaf-computed (lambda () (etaf-gamekit-view session :events)) :test #'equal)))
   :view
   (column :ref 'salvage-log :width 'stretch
@@ -310,15 +329,15 @@
       (etaf-tag :text (plist-get event :title) :variant (intern (plist-get event :kind)))
       (etaf-label :text (plist-get event :detail) :variant 'muted :wrap-mode 'word))))
 
-(etaf-define-component etaf-gamekit--salvage-sidebar (&key session selected compact horizontal active)
+(etaf-define-component salvage--sidebar (&key session selected compact horizontal active)
   :view
   (grid :ref 'salvage-sidebar :width 'stretch
         :grid-template-columns (if horizontal '((fr 1) (fr 1)) '((fr 1)))
         :gap '((lh 1) (ch 2))
-    (etaf-gamekit--salvage-inspector :key 'inspection :session session :selected selected :compact compact)
-    (etaf-gamekit--salvage-cargo :key 'cargo :session session :compact compact :active active)))
+    (salvage--inspector :key 'inspection :session session :selected selected :compact compact)
+    (salvage--cargo :key 'cargo :session session :compact compact :active active)))
 
-(etaf-define-component etaf-gamekit--salvage-app (&key session)
+(etaf-define-component salvage--app (&key session)
   :bindings ((ready (etaf-computed (lambda () (equal (etaf-gamekit-view session :schema) "salvage/1"))))
              (selected (etaf-ref "pilot")) (help (etaf-ref nil)) (tools (etaf-ref nil))
              (cargo-tab (etaf-ref "cargo"))
@@ -331,7 +350,7 @@
              (stacked (etaf-computed (lambda () (and (etaf-value narrow)
                                                      (>= (cdr (etaf-value viewport)) 48)))))
              (drawer (etaf-computed (lambda () (and (etaf-value narrow) (not (etaf-value stacked)))))))
-  :setup (etaf-theme-provide etaf-gamekit--salvage-theme)
+  :setup (etaf-theme-provide salvage--theme)
   :view
   (flex :width 'stretch :height 'stretch :min-width '(ch 76) :min-height '(lh 30)
         :flex-direction 'column :align-items 'center :background-color "#091522"
@@ -341,13 +360,13 @@
             :item-gap (if (etaf-value dense) '(lh 0) '(lh 1))
             :background-color "#091522" :color "#DBE8F5"
             :keys (list
-                   (list "w" (lambda () (etaf-gamekit--salvage-act session "move" '(:x 0 :y -1))) "Move north")
-                   (list "a" (lambda () (etaf-gamekit--salvage-act session "move" '(:x -1 :y 0))) "Move west")
-                   (list "s" (lambda () (etaf-gamekit--salvage-act session "move" '(:x 0 :y 1))) "Move south")
-                   (list "d" (lambda () (etaf-gamekit--salvage-act session "move" '(:x 1 :y 0))) "Move east")
-                   (list "p" (lambda () (etaf-gamekit--salvage-act session "pause")) "Pause or resume")
-                   (list "1" (lambda () (etaf-gamekit--salvage-act session "pulse")) "EMP pulse")
-                   (list "2" (lambda () (etaf-gamekit--salvage-act session "shield")) "Shield")
+                   (list "w" (lambda () (salvage--act session "move" '(:x 0 :y -1))) "Move north")
+                   (list "a" (lambda () (salvage--act session "move" '(:x -1 :y 0))) "Move west")
+                   (list "s" (lambda () (salvage--act session "move" '(:x 0 :y 1))) "Move south")
+                   (list "d" (lambda () (salvage--act session "move" '(:x 1 :y 0))) "Move east")
+                   (list "p" (lambda () (salvage--act session "pause")) "Pause or resume")
+                   (list "1" (lambda () (salvage--act session "pulse")) "EMP pulse")
+                   (list "2" (lambda () (salvage--act session "shield")) "Shield")
                    (list "<f1>" (lambda () (setf (etaf-value help) t)) "Flight manual"))
       (flex :width 'stretch :justify-content 'space-between
         (column
@@ -355,34 +374,34 @@
           (etaf-label :if (not (etaf-value compact)) :text "EXPEDITION 07 · Recover the cores. Make it home." :variant 'muted))
         (row :item-gap '(ch 1)
           (etaf-button :label "Save" :variant 'ghost :ref 'salvage-save
-                       :on-press (lambda () (etaf-gamekit--salvage-file session "save")))
+                       :on-press (lambda () (salvage--file session "save")))
           (etaf-button :label "Load" :variant 'ghost :ref 'salvage-load
-                       :on-press (lambda () (etaf-gamekit--salvage-file session "load")))
+                       :on-press (lambda () (salvage--file session "load")))
           (etaf-button :label (if (etaf-value narrow) "New" "New run") :variant 'ghost :ref 'salvage-restart
-                       :on-press (lambda () (etaf-gamekit--salvage-act session "restart")))
+                       :on-press (lambda () (salvage--act session "restart")))
           (etaf-button :if (etaf-value drawer) :label "Panels" :ref 'salvage-show-panels :variant 'secondary
                        :on-press (lambda () (setf (etaf-value tools) t)))
           (etaf-button :label (if (etaf-value narrow) "Help" "Help · F1") :variant 'ghost :ref 'salvage-help
                        :on-press (lambda () (setf (etaf-value help) t)))))
       (etaf-label :if (not (etaf-value ready)) :text "Preparing expedition…" :variant 'muted)
-      (etaf-gamekit--salvage-metrics :if (etaf-value ready) :session session :compact (etaf-value dense) :narrow (etaf-value narrow))
+      (salvage--metrics :if (etaf-value ready) :session session :compact (etaf-value dense) :narrow (etaf-value narrow))
       (grid :if (etaf-value ready) :ref 'salvage-body :width 'stretch
             :grid-template-columns (if (etaf-value narrow) '((fr 1)) '((ch 70) (fr 1)))
             :gap '((lh 1) (ch 2))
         (flex :key 'map-pane :width 'stretch :justify-content 'center
-          (etaf-gamekit--salvage-map :session session :selected selected
+          (salvage--map :session session :selected selected
                                     :compact (or (etaf-value compact) (etaf-value stacked)) :narrow (etaf-value narrow)))
-        (etaf-gamekit--salvage-sidebar :if (not (etaf-value drawer)) :key 'side-pane
+        (salvage--sidebar :if (not (etaf-value drawer)) :key 'side-pane
           :session session :selected selected :active cargo-tab
           :horizontal (etaf-value stacked) :compact (or (etaf-value compact) (etaf-value stacked))))
-      (etaf-gamekit--salvage-commands :if (etaf-value ready) :session session :narrow (etaf-value narrow))
+      (salvage--commands :if (etaf-value ready) :session session :narrow (etaf-value narrow))
       (etaf-alert :if (etaf-gamekit-last-error session) :title "Action not completed"
                   :message (etaf-gamekit-last-error session) :variant 'danger)
-      (etaf-gamekit--salvage-log :if (etaf-value ready) :session session :compact (etaf-value dense))
+      (salvage--log :if (etaf-value ready) :session session :compact (etaf-value dense))
       (etaf-dialog :open (and (etaf-value ready) (etaf-value drawer) (etaf-value tools))
                    :title "EXPEDITION CONSOLE" :width '(ch 72) :compact t
                    :on-close (lambda () (setf (etaf-value tools) nil))
-        (etaf-gamekit--salvage-sidebar :session session :selected selected :active cargo-tab :horizontal t :compact t))
+        (salvage--sidebar :session session :selected selected :active cargo-tab :horizontal t :compact t))
       (etaf-dialog :open help :title "FLIGHT MANUAL" :width '(ch 68) :compact t
                    :on-close (lambda () (setf (etaf-value help) nil))
         (column :item-gap '(lh 1)
@@ -391,9 +410,22 @@
           (etaf-label :text "P pauses the simulation. 1 fires an EMP within five tiles. 2 protects your hull for five seconds." :wrap-mode 'word)
           (etaf-label :text "Use Cargo for repairs. Save and Load preserve the expedition. A restored run starts paused." :wrap-mode 'word))))))
 
-(defun etaf-gamekit--salvage-view (session)
+(defun salvage--view (session)
   "Compose the game from the public ETAF and GameKit contracts."
-  (etaf-view (etaf-gamekit--salvage-app :session session)))
+  (etaf-view (salvage--app :session session)))
 
-(provide 'etaf-gamekit-salvage)
-;;; etaf-gamekit-salvage.el ends here
+(etaf-gamekit-define-game salvage-game
+  :title "Salvage Station" :backend 'godot
+  :options (list :project salvage--directory)
+  :view #'salvage--view :validate #'salvage--valid-p)
+
+(defun salvage-open ()
+  "Start and display an independent Salvage Station expedition."
+  (interactive)
+  (let ((session (etaf-gamekit-start salvage-game)))
+    (pop-to-buffer (etaf-gamekit-buffer session))
+    (etaf-refit (etaf-runtime-for-buffer (etaf-gamekit-buffer session)) (selected-window))
+    session))
+
+(provide 'salvage)
+;;; salvage.el ends here

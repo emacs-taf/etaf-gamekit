@@ -1,15 +1,17 @@
 ;;; -*- lexical-binding: t; -*-
-;;; etaf-gamekit.el --- Game runtimes with native ETAF presentation
+;;; etaf-gamekit.el --- Framework for games with native ETAF presentation
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (etaf "0.2.1") (etaf-ui "0.1.0"))
+;; Package-Requires: ((emacs "29.1") (etaf "0.2.1"))
 ;; Keywords: games
 
 ;;; Commentary:
-;; GameKit gives external game runtimes one session and message contract.
-;; Godot is the included runtime. Games own rules and observations; applications
-;; compose any ETAF view from those observations. See docs/manual.md.
+;; Applications define games with their rules, backend configuration and ETAF
+;; presentation. GameKit starts independent game instances and owns transport,
+;; state publication, actions and lifetime. Backend adapters remain beneath this
+;; game-level contract. Runnable applications live in examples/; requiring the
+;; framework does not load them. See docs/manual.md for standalone game projects.
 ;;
 ;; Error: etaf-gamekit-error
 ;; Invalid session operation, missing runtime or malformed protocol message.
@@ -24,16 +26,38 @@
 ;; Positive startup/action deadline in seconds (default 15). Timeout fails the
 ;; connection and retains its latest observation for recovery and inspection.
 ;;
-;; Function: etaf-gamekit-start (command &key buffer view validate)
+;; Variable: etaf-gamekit-node-program
+;; Node.js 18+ executable or PATH command for boardgame.io (default "node").
+;; Install its pinned dependencies with make engine-boardgame-io.
+;;
+;; Variable: etaf-gamekit-openspiel-python-program
+;; Python executable with OpenSpiel installed. Defaults to the isolated cache
+;; environment created by make engine-openspiel; configure before opening.
+;;
+;; Macro: etaf-gamekit-define-game (name &rest properties)
+;;;###autoload (autoload 'etaf-gamekit-define-game "etaf-gamekit" nil nil 'macro)
+;; Define constant NAME as an opaque, inert game definition; return NAME.
+;; Evaluated properties are :title (default NAME's spelling), :backend (required
+;; registered adapter symbol), :options (JSON-compatible keyword plist), :view
+;; and :validate. VIEW receives the running instance and returns an ETAF View;
+;; omitted displays game status. VALIDATE receives a detached observation and
+;; must return exactly t. Definition starts no process or application mount.
+;; Each game's own package keeps its rules, assets, UI and launch command.
+;;
+;; Function: etaf-gamekit-start (game &key buffer options)
 ;;;###autoload (autoload 'etaf-gamekit-start "etaf-gamekit" nil nil)
-;; Start COMMAND, a program/argument string list, and return an opaque session.
-;; BUFFER is a name or buffer; omitted creates a fresh buffer. A supplied buffer
-;; must be empty and unmounted. VIEW is a function receiving the session and
-;; returning an ETAF View; omitted displays connection status. VALIDATE, when
-;; supplied, is a pure function receiving a detached observation and returning
-;; exactly t for a valid application schema. Rejection fails the connection.
-;; Startup is asynchronous. Killing or unmounting the buffer releases the
-;; owned process and timers. The wire contract is in docs/manual.md.
+;; Start an independent instance of GAME, a value defined with define-game.
+;; Return its opaque session. OPTIONS overrides the game's backend options for
+;; this instance without changing the definition. BUFFER is an empty, unmounted
+;; buffer or name; omitted creates a fresh buffer named after the game title.
+;; This function does not select a window. Startup is asynchronous. Invalid
+;; configuration signals etaf-gamekit-error before launching; schema rejection,
+;; deadline and transport failures are observable through status/last-error.
+;; Killing or unmounting the buffer releases the owned process and timers.
+;;
+;; Function: etaf-gamekit-game-info (session)
+;; Return detached (:name SYMBOL :title STRING :backend SYMBOL) metadata for
+;; SESSION's game. Metadata is available during the initial view construction.
 ;;
 ;; Function: etaf-gamekit-action (session operation &optional arguments)
 ;;;###autoload (autoload 'etaf-gamekit-action "etaf-gamekit" nil nil)
@@ -77,23 +101,28 @@
 ;; Idempotently release the session's process, timers and application mount.
 ;; Preserve its buffer and last observation for inspection. No save is implied.
 ;;
-;; Function: etaf-gamekit-open-godot (project &key buffer view validate)
-;;;###autoload (autoload 'etaf-gamekit-open-godot "etaf-gamekit" nil nil)
-;; Run PROJECT's project.godot with the shared Godot bridge; return a session.
-;; The project supplies gamekit/game_script with the game-side contract in the
-;; manual. BUFFER, VIEW and VALIDATE have the same meaning as start. No Godot
-;; window opens; all presentation and input remain in ETAF.
+;; Function: etaf-gamekit-register-backend (name &key title launch features replace)
+;; Backend author API: register symbolic NAME with TITLE and LAUNCH. LAUNCH
+;; receives detached game OPTIONS and returns a program/argument string list;
+;; GameKit owns starting and stopping that process. FEATURES are descriptive
+;; symbols, not active-game permissions or an installation claim. Duplicate
+;; names fail unless REPLACE is non-nil. Return NAME. Active games are unaffected.
 ;;
-;; Function: etaf-gamekit-open-demo ()
-;;;###autoload (autoload 'etaf-gamekit-open-demo "etaf-gamekit" nil t)
-;; Open Salvage Station, the maintained real-time Godot integration game.
-;; Return its session and display its native ETAF application buffer.
+;; Function: etaf-gamekit-unregister-backend (name)
+;; Remove NAME from future discovery and game starts. Return t when it existed,
+;; nil otherwise. Active game instances remain owned by their callers.
+;;
+;; Function: etaf-gamekit-backends ()
+;; Return detached adapter descriptions (:name SYMBOL :title STRING :features
+;; SYMBOLS), sorted by name. Built-ins are godot, boardgame-io and openspiel.
+;; Registration does not install dependencies. Game configuration and adapter
+;; installation belong to the workflows documented in docs/manual.md.
 
 ;;; Code:
-(require 'etaf-ui)
+(require 'etaf)
 (defconst etaf-gamekit--directory
   (file-name-directory (or load-file-name buffer-file-name)))
-(defgroup etaf-gamekit nil "Game runtimes with ETAF presentation." :group 'games)
+(defgroup etaf-gamekit nil "Build games with ETAF presentation." :group 'games)
 (defcustom etaf-gamekit-godot-program
   (expand-file-name
    "emacs-taf/game-engines/bin/godot"
@@ -103,10 +132,19 @@
 (defcustom etaf-gamekit-request-timeout 15
   "Maximum seconds for a complete adapter response."
   :type 'number :group 'etaf-gamekit)
+(defcustom etaf-gamekit-node-program "node"
+  "Node.js executable used by the boardgame.io adapter."
+  :type 'string :group 'etaf-gamekit)
+(defcustom etaf-gamekit-openspiel-python-program
+  (expand-file-name "emacs-taf/game-engines/openspiel/bin/python"
+                    (or (getenv "XDG_CACHE_HOME") (expand-file-name "~/.cache")))
+  "Python executable with the pinned OpenSpiel package installed."
+  :type 'string :group 'etaf-gamekit)
 (define-error 'etaf-gamekit-error "ETAF game error")
 (let ((load-path (cons (expand-file-name "lisp" etaf-gamekit--directory) load-path)))
   (require 'etaf-gamekit-session)
-  (require 'etaf-gamekit-view)
-  (require 'etaf-gamekit-salvage))
+  (require 'etaf-gamekit-backends)
+  (require 'etaf-gamekit-game)
+  (require 'etaf-gamekit-view))
 (provide 'etaf-gamekit)
 ;;; etaf-gamekit.el ends here

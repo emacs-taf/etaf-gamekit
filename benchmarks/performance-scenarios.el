@@ -7,9 +7,17 @@
 
 ;;; Code:
 (require 'etaf-gamekit)
+(require 'etaf-ui)
+(declare-function salvage-open "salvage" ())
 (declare-function taf-benchmark-register "performance-driver" (id &rest properties))
 (defconst etaf-gamekit-benchmark--directory
   (file-name-directory (or load-file-name buffer-file-name)))
+
+(etaf-gamekit-register-backend 'gamekit-grid-benchmark
+  :title "Character transport workload" :features '(benchmark)
+  :launch (lambda (options)
+            (list "python3" (expand-file-name "grid-source.py" etaf-gamekit-benchmark--directory)
+                  "--density" (number-to-string (plist-get options :density)))) :replace t)
 
 (defun etaf-gamekit-benchmark--text (session)
   "Read SESSION's visible plain text."
@@ -25,13 +33,13 @@
     (etaf-text-grid :columns 80 :rows 24
       :row-text (lambda (row) (or (nth row (etaf-value rows)) "")))))
 
+(etaf-gamekit-define-game etaf-gamekit-benchmark--grid-game
+  :title "Character transport workload" :backend 'gamekit-grid-benchmark
+  :view (lambda (session) (etaf-view (etaf-gamekit-benchmark--grid-view :session session))))
+
 (defun etaf-gamekit-benchmark--grid (mode density &optional fps)
   "Create a DENSITY character fixture for MODE, optionally streaming at FPS."
-  (let* ((session (etaf-gamekit-start
-                   (list "python3" (expand-file-name "grid-source.py" etaf-gamekit-benchmark--directory)
-                         "--density" (number-to-string density))
-                   :view (lambda (game)
-                           (etaf-view (etaf-gamekit-benchmark--grid-view :session game)))))
+  (let* ((session (etaf-gamekit-start etaf-gamekit-benchmark--grid-game :options (list :density density)))
          (runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
          (expected 0) (seen nil) (accepted nil) (started nil) (before 0) snapshot)
     (cl-labels
@@ -95,7 +103,9 @@
 
 (defun etaf-gamekit-benchmark--salvage (mode operation)
   "Create a complete game surface for MODE and measured OPERATION."
-  (let* ((session (etaf-gamekit-open-demo))
+  (let ((load-path (cons (expand-file-name "../examples/salvage" etaf-gamekit-benchmark--directory) load-path)))
+    (require 'salvage))
+  (let* ((session (salvage-open))
          (runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
          (expected nil) (target nil))
     (list
@@ -143,6 +153,65 @@
      :version 2 :modes '(batch gui) :isolation 'series :impact 'subtree
      :budget-ms (cadr case) :description (caddr case)
      :setup (lambda (mode) (etaf-gamekit-benchmark--salvage mode operation)))))
+
+(etaf-define-component etaf-gamekit-benchmark--kernel-view (&key session kind)
+  :view
+  (text (expr
+         (pcase kind
+           ('tabletop (format "Pool %s" (plist-get (plist-get (etaf-gamekit-view session :state) :G) :pool)))
+           ('simultaneous (if (eq t (etaf-gamekit-view session :terminal)) "Terminal" "Playing"))))))
+
+(etaf-gamekit-define-game etaf-gamekit-benchmark--tabletop
+  :title "Native turn transition" :backend 'boardgame-io
+  :options (list :game (expand-file-name "../tests/fixtures/tabletop.cjs" etaf-gamekit-benchmark--directory)
+                 :player "0" :seed "benchmark")
+  :view (lambda (session)
+          (etaf-view (etaf-gamekit-benchmark--kernel-view :session session :kind 'tabletop))))
+
+(etaf-gamekit-define-game etaf-gamekit-benchmark--simultaneous
+  :title "Native joint transition" :backend 'openspiel
+  :options '(:game "matrix_rps" :player 0 :seed 42)
+  :view (lambda (session)
+          (etaf-view (etaf-gamekit-benchmark--kernel-view :session session :kind 'simultaneous))))
+
+(defun etaf-gamekit-benchmark--kernel (mode kind)
+  "Measure native KIND actions through a game instance and its view in MODE."
+  (let* ((session (etaf-gamekit-start (if (eq kind 'tabletop)
+                                       etaf-gamekit-benchmark--tabletop
+                                     etaf-gamekit-benchmark--simultaneous)))
+         (runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session))) expected)
+    (list
+     :buffer (etaf-gamekit-buffer session)
+     :ready (lambda ()
+              (if (eq mode 'batch) (etaf-runtime-refit runtime 1200 45)
+                (etaf-refit runtime (selected-window)))
+              (eq (etaf-gamekit-status session) 'ready))
+     :invoke
+     (lambda (index)
+       (let ((advance (cl-evenp index)))
+         (pcase kind
+           ('tabletop
+            (setq expected (if advance "Pool 11" "Pool 12"))
+            (etaf-gamekit-action session (if advance "move" "undo")
+                                (when advance '(:name "claim" :args [1]))))
+           ('simultaneous
+            (setq expected (if advance "Terminal" "Playing"))
+            (etaf-gamekit-action session (if advance "joint-action" "reset")
+                                (when advance '(:actions [0 1])))))))
+     :settled (lambda () (and (eq (etaf-gamekit-status session) 'ready)
+                              (string-match-p expected (etaf-gamekit-benchmark--text session))))
+     :verify (lambda () (or (etaf-gamekit-last-error session) t))
+     :outcome (lambda () (list :backend (symbol-name (plist-get (etaf-gamekit-game-info session) :backend))
+                               :display expected))
+     :cleanup (lambda () (etaf-gamekit-close session) (kill-buffer (etaf-gamekit-buffer session))))))
+
+(dolist (kind '(tabletop simultaneous))
+  (let ((operation kind))
+    (taf-benchmark-register
+     (format "etaf-gamekit.kernel.%s" operation)
+     :version 1 :modes '(batch gui) :isolation 'series :impact 'subtree :budget-ms 16.67
+     :description "Native kernel action through a game instance to its painted observation"
+     :setup (lambda (mode) (etaf-gamekit-benchmark--kernel mode operation)))))
 
 (provide 'etaf-gamekit-performance-scenarios)
 ;;; performance-scenarios.el ends here

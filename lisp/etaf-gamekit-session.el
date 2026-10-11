@@ -6,18 +6,14 @@
 ;;; Code:
 (require 'cl-lib)
 (require 'json)
-(require 'etaf-ui)
-(defvar etaf-gamekit--directory)
-(defvar etaf-gamekit-godot-program)
+(require 'etaf)
 (defvar etaf-gamekit-request-timeout)
 (declare-function etaf-gamekit--mount "etaf-gamekit-view" (session))
-(declare-function etaf-gamekit--salvage-view "etaf-gamekit-salvage" (session))
-(declare-function etaf-gamekit--salvage-valid-p "etaf-gamekit-salvage" (view))
 
 (cl-defstruct (etaf-gamekit--session (:constructor etaf-gamekit--make-session))
-  process buffer stderr timer deadline reaper presentation validator (input "") (next-id 0) pending
+  process buffer stderr timer deadline reaper presentation validator game-info (input "") (next-id 0) pending
   (revision 0) capabilities observation error (status 'starting)
-  (view-ref (etaf-ref nil :test #'equal)) (capabilities-ref (etaf-ref nil :test #'equal)) (status-ref (etaf-ref "Starting engine…"))
+  (view-ref (etaf-ref nil :test #'equal)) (capabilities-ref (etaf-ref nil :test #'equal)) (status-ref (etaf-ref "Starting game…"))
   (error-ref (etaf-ref "")))
 
 (defun etaf-gamekit-status (session)
@@ -37,6 +33,11 @@
 (defun etaf-gamekit--copy (value)
   "Detach JSON VALUE from session ownership."
   (cond ((stringp value) (copy-sequence value))
+        ((vectorp value) (vconcat (mapcar #'etaf-gamekit--copy value)))
+        ((hash-table-p value)
+         (let ((result (copy-hash-table value)))
+           (maphash (lambda (key item) (puthash key (etaf-gamekit--copy item) result)) value)
+           result))
         ((consp value) (cons (etaf-gamekit--copy (car value))
                             (etaf-gamekit--copy (cdr value))))
         (t value)))
@@ -64,8 +65,8 @@
             (etaf-gamekit--session-observation session)
             (etaf-value (etaf-gamekit--session-status-ref session))
             (pcase (etaf-gamekit-status session)
-              ('starting "Starting engine…") ('busy "Engine working…")
-              ('failed "Engine disconnected") ('closed "Closed") (_ "Ready"))
+              ('starting "Starting game…") ('busy "Applying action…")
+              ('failed "Game disconnected") ('closed "Closed") (_ "Ready"))
             (etaf-value (etaf-gamekit--session-error-ref session))
             (or (etaf-gamekit-last-error session) "")
             (etaf-value (etaf-gamekit--session-capabilities-ref session))
@@ -238,8 +239,8 @@
         (etaf-unmount runtime))))
   nil)
 
-(cl-defun etaf-gamekit-start (command &key buffer view validate)
-  "Start adapter COMMAND and mount BUFFER with VIEW and optional VALIDATE."
+(defun etaf-gamekit--start (command buffer view validate game-info)
+  "Create one game instance with COMMAND, BUFFER, VIEW, VALIDATE and GAME-INFO."
   (unless (and (numberp etaf-gamekit-request-timeout) (> etaf-gamekit-request-timeout 0)
                (consp command) (proper-list-p command) (cl-every #'stringp command)
                (or (null view) (functionp view))
@@ -247,7 +248,8 @@
     (signal 'etaf-gamekit-error '("Command must be a nonempty program/argument list")))
   (let* ((buffer (if buffer (get-buffer-create buffer)
                    (generate-new-buffer "*ETAF Game*")))
-         (session (etaf-gamekit--make-session :buffer buffer :presentation view :validator validate)))
+         (session (etaf-gamekit--make-session :buffer buffer :presentation view :validator validate
+                                             :game-info game-info)))
     (unless (and (zerop (buffer-size buffer)) (not (etaf-runtime-for-buffer buffer)))
       (signal 'etaf-gamekit-error '("The game buffer must be empty and unmounted")))
     (condition-case failure
@@ -284,35 +286,6 @@
       (error
        (etaf-gamekit-close session)
        (signal (car failure) (cdr failure))))))
-
-(defun etaf-gamekit--godot ()
-  "Resolve the configured Godot program without changing the user's PATH."
-  (or (and (file-executable-p etaf-gamekit-godot-program) etaf-gamekit-godot-program)
-      (executable-find etaf-gamekit-godot-program)
-      (signal 'etaf-gamekit-error '("Godot is missing; run make engine or set etaf-gamekit-godot-program"))))
-
-(defun etaf-gamekit--display (session)
-  "Show SESSION and fit its newly displayed buffer."
-  (pop-to-buffer (etaf-gamekit-buffer session))
-  (etaf-refit (etaf-runtime-for-buffer (etaf-gamekit-buffer session)) (selected-window)))
-
-(cl-defun etaf-gamekit-open-godot (project &key buffer view validate)
-  "Run Godot PROJECT through the shared bridge and mount its VIEW."
-  (unless (file-readable-p (expand-file-name "project.godot" project))
-    (signal 'etaf-gamekit-error '("PROJECT must contain project.godot")))
-  (etaf-gamekit-start
-   (list (etaf-gamekit--godot) "--headless" "--no-header" "--path" (expand-file-name project)
-         "--script" (expand-file-name "native/godot/gamekit.gd" etaf-gamekit--directory))
-   :buffer buffer :view view :validate validate))
-
-(defun etaf-gamekit-open-demo ()
-  "Play Salvage Station with a Godot backend and an ETAF interface."
-  (interactive)
-  (let ((session (etaf-gamekit-open-godot
-                  (expand-file-name "examples/salvage" etaf-gamekit--directory)
-                  :view #'etaf-gamekit--salvage-view :validate #'etaf-gamekit--salvage-valid-p)))
-    (etaf-gamekit--display session)
-    session))
 
 (provide 'etaf-gamekit-session)
 ;;; etaf-gamekit-session.el ends here

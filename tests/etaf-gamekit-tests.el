@@ -5,9 +5,16 @@
 ;;; Code:
 (require 'ert)
 (require 'etaf-gamekit)
+(require 'etaf-ui)
 
 (defconst etaf-gamekit-test--directory
   (file-name-directory (or load-file-name buffer-file-name)))
+
+(etaf-gamekit-register-backend 'gamekit-test-peer
+  :title "Controllable protocol peer" :features '(test-peer)
+  :launch (lambda (options)
+            (list "python3" (expand-file-name "fixtures/adapter.py" etaf-gamekit-test--directory)
+                  (plist-get options :mode))) :replace t)
 
 (defun etaf-gamekit-test--wait (session &optional predicate)
   "Wait for SESSION's state and publication, optionally until PREDICATE holds."
@@ -34,8 +41,8 @@
 
 (defun etaf-gamekit-test--peer (mode &optional validator)
   "Connect a public session to the fixture in MODE with optional VALIDATOR."
-  (etaf-gamekit-start
-   (list "python3" (expand-file-name "fixtures/adapter.py" etaf-gamekit-test--directory) mode)
+  (etaf-gamekit-define-game etaf-gamekit-test--peer-game
+   :title "Transport contract" :backend 'gamekit-test-peer
    :validate (or validator
                  (lambda (value)
                    (and (equal (plist-get value :schema) "fixture/1")
@@ -46,106 +53,126 @@
             (column
               (etaf-text-grid :columns 8 :rows 1
                 :row-text (lambda (row) (or (nth row (etaf-gamekit-view session :rows)) "")))
-              (etaf-label :text (or (etaf-gamekit-last-error session) "Ready")))))))
+              (etaf-label :text (or (etaf-gamekit-last-error session) "Ready"))))))
+  (etaf-gamekit-start etaf-gamekit-test--peer-game :options (list :mode mode)))
 
-(ert-deftest etaf-gamekit-salvage-controls-change-the-live-world ()
-  "Tile selection, target routing and skill controls update a real game."
-  (let (session)
-    (unwind-protect
-        (save-window-excursion
-          (setq session (etaf-gamekit-open-demo))
-          (etaf-gamekit-test--wait session)
-          (let ((runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session))))
-            (etaf-runtime-refit runtime 1200 46)
-            (etaf-dispatch-event runtime 'salvage-tile-3-12 'press)
-            (should (string-match-p "Power core 1" (etaf-gamekit-test--text session)))
-            (etaf-dispatch-event runtime 'salvage-route-target 'press)
-            (etaf-gamekit-test--wait session)
-            (should (equal (car (last (plist-get (plist-get (etaf-gamekit-observation session) :world) :route)))
-                           '(12 3)))
-            (etaf-dispatch-event runtime 'salvage-pause 'press)
-            (etaf-gamekit-test--wait
-             session (lambda () (= (plist-get (plist-get (etaf-gamekit-observation session) :pilot) :cores) 1)))
-            (etaf-dispatch-event runtime 'salvage-pause 'press)
-            (etaf-gamekit-test--wait session)
-            (should (string-match-p "1 / 3 CORES" (etaf-gamekit-test--text session)))
-            (etaf-dispatch-event runtime 'salvage-shield 'press)
-            (etaf-gamekit-test--wait session)
-            (should (= (plist-get (plist-get (etaf-gamekit-observation session) :pilot) :energy) 75))
-            (etaf-dispatch-event runtime 'salvage-objectives-tab 'press)
-            (should (string-match-p "Recover three power cores" (etaf-gamekit-test--text session)))
-            (etaf-dispatch-event runtime 'salvage-help 'press)
-            (should (string-match-p "FLIGHT MANUAL" (etaf-gamekit-test--text session)))))
-      (etaf-gamekit-test--dispose session))))
+(etaf-gamekit-define-game etaf-gamekit-test--tabletop
+  :title "Tabletop rules" :backend 'boardgame-io
+  :options (list :game (expand-file-name "fixtures/tabletop.cjs" etaf-gamekit-test--directory)
+                 :num-players 2 :player "0" :seed "contract"))
 
-(ert-deftest etaf-gamekit-salvage-native-keys-retain-rapid-input ()
-  "Native directional keys reach the backend in order while paused."
-  (let (session)
-    (unwind-protect
-        (save-window-excursion
-          (setq session (etaf-gamekit-open-demo))
-          (etaf-gamekit-test--wait session)
-          (switch-to-buffer (etaf-gamekit-buffer session))
-          (let ((runtime (etaf-runtime-for-buffer (current-buffer))))
-            (etaf-refit runtime (selected-window))
-            (etaf-focus runtime 'salvage-tile-4-4)
-            (execute-kbd-macro (kbd "d d d"))
-            (etaf-gamekit-test--wait session)
-            (should-not (etaf-gamekit-last-error session))
-            (should (equal (car (last (plist-get (plist-get (etaf-gamekit-observation session) :world) :route)))
-                           '(7 4)))))
-      (etaf-gamekit-test--dispose session))))
+(etaf-gamekit-define-game etaf-gamekit-test--poker
+  :title "Poker rules" :backend 'openspiel
+  :options '(:game "kuhn_poker" :player 0 :seed 42))
 
-(ert-deftest etaf-gamekit-salvage-resizes-with-a-readable-minimum ()
-  "Reflow preserves map metrics and panel state; tiny viewports clip the canvas."
-  (let (session)
+(ert-deftest etaf-gamekit-game-definitions-create-independent-instances ()
+  "A game definition creates independent worlds and supplies its view metadata."
+  (etaf-gamekit-define-game etaf-gamekit-test--independent
+    :title "Independent game" :backend 'gamekit-test-peer :options '(:mode "split")
+    :view (lambda (instance)
+            (etaf-view (text (expr (plist-get (etaf-gamekit-game-info instance) :title))))))
+  (let (first second)
     (unwind-protect
-        (save-window-excursion
-          (setq session (etaf-gamekit-open-demo))
-          (etaf-gamekit-test--wait session)
-          (let* ((runtime (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
-                 (map-size (etaf-host-ref-size runtime 'salvage-map))
-                 (cell-size (etaf-host-ref-size runtime 'salvage-tile-0-0))
-                 (minimum (* 38 (car cell-size))))
-            (dolist (size '((1428 . 50) (1000 . 42) (900 . 36) (780 . 32)
-                            (700 . 50) (640 . 32) (1400 . 34)))
-              (etaf-runtime-refit runtime (car size) (cdr size))
-              (let ((root (etaf-host-ref-size runtime 'salvage-root)))
-                (should (<= (car root) (max minimum (car size))))
-                (should (<= (cdr root) (max 30 (cdr size)))))
-              (should (equal (etaf-host-ref-size runtime 'salvage-map) map-size))
-              (should (equal (etaf-host-ref-size runtime 'salvage-tile-0-0) cell-size))
-              (should (etaf-host-ref-size runtime 'salvage-commands))
-              (should (or (etaf-host-ref-size runtime 'salvage-cargo)
-                          (etaf-host-ref-size runtime 'salvage-show-panels))))
-            (etaf-runtime-refit runtime 640 32)
-            (etaf-dispatch-event runtime 'salvage-show-panels 'press)
-            (should (string-match-p "EXPEDITION CONSOLE" (etaf-gamekit-test--text session)))
-            (etaf-dispatch-event runtime 'salvage-objectives-tab 'press)
-            (execute-kbd-macro (kbd "<escape>"))
-            (etaf-runtime-refit runtime 1200 46)
-            (should (string-match-p "Recover three power cores" (etaf-gamekit-test--text session)))
-            (etaf-runtime-refit runtime (- minimum 20) 20)
-            (should (equal (etaf-host-ref-size runtime 'salvage-map) map-size))
-            (should (equal (etaf-host-ref-size runtime 'salvage-root) (cons minimum 30)))))
-      (etaf-gamekit-test--dispose session))))
+        (progn
+          (setq first (etaf-gamekit-start etaf-gamekit-test--independent)
+                second (etaf-gamekit-start etaf-gamekit-test--independent))
+          (should (string-match-p "Independent game" (etaf-gamekit-test--text first)))
+          (should-not (eq (etaf-gamekit-buffer first) (etaf-gamekit-buffer second)))
+          (etaf-gamekit-test--wait first) (etaf-gamekit-test--wait second)
+          (etaf-gamekit-action first "step") (etaf-gamekit-test--wait first)
+          (should (= (plist-get (etaf-gamekit-observation first) :count) 1))
+          (should (= (plist-get (etaf-gamekit-observation second) :count) 0))
+          (aset (plist-get (etaf-gamekit-game-info first) :title) 0 ?X)
+          (should (equal (plist-get (etaf-gamekit-game-info first) :title) "Independent game"))
+          (should-error (etaf-gamekit-start 'godot) :type 'etaf-gamekit-error))
+      (etaf-gamekit-test--dispose first) (etaf-gamekit-test--dispose second))))
 
-(ert-deftest etaf-gamekit-salvage-snapshot-restores-through-the-session ()
-  "A real saved expedition loads paused and remains valid for its frontend."
-  (let ((file (make-temp-file "game-snapshot-")) session)
+(ert-deftest etaf-gamekit-backend-registration-preserves-owned-games ()
+  "Replacing/removing an adapter affects future starts without taking live games."
+  (let ((options (list :mode "split" :payload (vector (copy-sequence "safe"))))
+        first second)
     (unwind-protect
-        (save-window-excursion
-          (setq session (etaf-gamekit-open-demo))
-          (etaf-gamekit-test--wait session)
-          (dolist (action `(("shield") ("save" :path ,file) ("restart") ("load" :path ,file)))
-            (etaf-gamekit-action session (car action) (cdr action))
+        (progn
+          (etaf-gamekit-register-backend 'gamekit-extension-test :title "Extension" :features '(test)
+            :launch (lambda (configuration)
+                      (aset (aref (plist-get configuration :payload) 0) 0 ?X)
+                      (list "python3" (expand-file-name "fixtures/adapter.py" etaf-gamekit-test--directory)
+                            (plist-get configuration :mode))))
+          (etaf-gamekit-define-game etaf-gamekit-test--extension
+            :backend 'gamekit-extension-test :options options)
+          (setq first (etaf-gamekit-start etaf-gamekit-test--extension))
+          (etaf-gamekit-test--wait first)
+          (should (equal (aref (plist-get options :payload) 0) "safe"))
+          (should-error
+           (etaf-gamekit-register-backend 'gamekit-extension-test :title "Duplicate" :launch #'identity)
+           :type 'etaf-gamekit-error)
+          (etaf-gamekit-register-backend 'gamekit-extension-test :title "Replacement" :replace t
+            :launch (lambda (_) (list "python3" (expand-file-name "fixtures/adapter.py" etaf-gamekit-test--directory) "crash")))
+          (setq second (etaf-gamekit-start etaf-gamekit-test--extension))
+          (etaf-gamekit-test--wait second)
+          (should (eq (etaf-gamekit-status second) 'failed))
+          (should (etaf-gamekit-unregister-backend 'gamekit-extension-test))
+          (should-error (etaf-gamekit-start etaf-gamekit-test--extension) :type 'etaf-gamekit-error)
+          (etaf-gamekit-action first "step") (etaf-gamekit-test--wait first)
+          (should (= (plist-get (etaf-gamekit-observation first) :count) 1)))
+      (etaf-gamekit-test--dispose first) (etaf-gamekit-test--dispose second)
+      (etaf-gamekit-unregister-backend 'gamekit-extension-test))))
+
+(ert-deftest etaf-gamekit-game-configurations-are-validated-and-detached ()
+  "Game options are detached data; invalid definitions and overrides fail clearly."
+  (let ((options (list :mode (copy-sequence "split"))))
+    (etaf-gamekit-define-game etaf-gamekit-test--configured :backend 'gamekit-test-peer :options options)
+    (aset (plist-get options :mode) 0 ?X)
+    (let ((session (etaf-gamekit-start etaf-gamekit-test--configured)))
+      (unwind-protect
+          (progn (etaf-gamekit-test--wait session) (should (eq (etaf-gamekit-status session) 'ready)))
+        (etaf-gamekit-test--dispose session))))
+  (should-error (etaf-gamekit-start etaf-gamekit-test--poker :options '("game" "kuhn_poker"))
+                :type 'etaf-gamekit-error)
+  (should-error (etaf-gamekit-start etaf-gamekit-test--poker :options '(:typo 1))
+                :type 'etaf-gamekit-error)
+  (should-error (etaf-gamekit-define-game etaf-gamekit-test--invalid :backend 3)
+                :type 'etaf-gamekit-error))
+
+(ert-deftest etaf-gamekit-games-route-actions-to-different-native-kernels ()
+  "Game definitions run boardgame.io turns and OpenSpiel poker through one API."
+  (let ((tabletop (etaf-gamekit-start etaf-gamekit-test--tabletop))
+        (poker (etaf-gamekit-start etaf-gamekit-test--poker)))
+    (unwind-protect
+        (progn
+          (etaf-gamekit-test--wait tabletop) (etaf-gamekit-test--wait poker)
+          (should (eq (plist-get (etaf-gamekit-game-info tabletop) :backend) 'boardgame-io))
+          (etaf-gamekit-action tabletop "move" '(:name "claim" :args [2]))
+          (etaf-gamekit-test--wait tabletop)
+          (should (= (plist-get (plist-get (plist-get (etaf-gamekit-observation tabletop) :state) :G) :pool) 10))
+          (etaf-gamekit-action tabletop "event" '(:name "endTurn"))
+          (etaf-gamekit-test--wait tabletop)
+          (should (equal (plist-get (plist-get (plist-get (etaf-gamekit-observation tabletop) :state) :ctx) :currentPlayer) "1"))
+          (dolist (action '(("act" :action 0) ("set-player" :player 1) ("act" :action 0)))
+            (etaf-gamekit-action poker (car action) (cdr action))
+            (etaf-gamekit-test--wait poker)
+            (should-not (etaf-gamekit-last-error poker)))
+          (should (eq (plist-get (etaf-gamekit-observation poker) :terminal) t))
+          (should (equal (etaf-gamekit-view poker) (etaf-gamekit-observation poker)))
+          (should-not (plist-get (etaf-gamekit-observation poker) :legal_actions)))
+      (etaf-gamekit-test--dispose tabletop) (etaf-gamekit-test--dispose poker))))
+
+(ert-deftest etaf-gamekit-game-snapshots-restore-through-the-same-action-api ()
+  "Opaque native/replay snapshots restore observations without frontend parsing."
+  (dolist (case (list (list etaf-gamekit-test--tabletop "move" '(:name "claim" :args [2]))
+                     (list etaf-gamekit-test--poker "act" '(:action 0))))
+    (let ((session (etaf-gamekit-start (car case))) (file (make-temp-file "gamekit-snapshot-")))
+      (unwind-protect
+          (progn
             (etaf-gamekit-test--wait session)
-            (should (eq (etaf-gamekit-status session) 'ready))
-            (should-not (etaf-gamekit-last-error session)))
-          (should (= (plist-get (plist-get (etaf-gamekit-observation session) :pilot) :energy) 75))
-          (should (string-match-p "Snapshot restored" (etaf-gamekit-test--text session))))
-      (etaf-gamekit-test--dispose session)
-      (delete-file file))))
+            (etaf-gamekit-action session (cadr case) (caddr case)) (etaf-gamekit-test--wait session)
+            (let ((before (etaf-gamekit-observation session)))
+              (dolist (action `(("save" :path ,file) ("reset") ("load" :path ,file)))
+                (etaf-gamekit-action session (car action) (cdr action))
+                (etaf-gamekit-test--wait session)
+                (should-not (etaf-gamekit-last-error session)))
+              (should (equal (etaf-gamekit-observation session) before))))
+        (etaf-gamekit-test--dispose session) (delete-file file)))))
 
 (ert-deftest etaf-gamekit-transport-fragments-detached-values-and-bounded-input ()
   "Fragments decode safely, reads detach ownership and eight inputs retain order."
@@ -195,6 +222,9 @@
               (etaf-gamekit-action session "step") (etaf-gamekit-test--wait session))
             (should (eq (etaf-gamekit-status session) 'failed))
             (should (stringp (etaf-gamekit-last-error session)))
+            (when (equal mode "crash")
+              (should (string-match-p "fixture engine stopped" (etaf-gamekit-last-error session)))
+              (should-not (string-match-p "Process .* finished" (etaf-gamekit-last-error session))))
             (should-error (etaf-gamekit-action session "step") :type 'etaf-gamekit-error))
         (etaf-gamekit-test--dispose session)))))
 
