@@ -42,7 +42,7 @@ The [package entry](etaf-gamekit.el) is the supported API inventory;
 [architecture](docs/architecture.md) explains responsibilities and engine choices.
 
 Game applications are independently maintained under the
-[etaf-games](https://forgejo.vhkd.top/emacs-taf/etaf-games) workspace. For
+[etaf-games](https://github.com/emacs-taf/etaf-games) workspace. For
 example, `etaf-solitaire` uses OpenSpiel and `etaf-salvage` uses Godot; each
 owns its entry, interface, rules configuration, resources and checks. Install
 and launch a game through its own package, not through a framework launcher.
