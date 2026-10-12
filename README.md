@@ -41,10 +41,15 @@ configure a backend, compose a frontend, manage instances and add an adapter.
 The [package entry](etaf-gamekit.el) is the supported API inventory;
 [architecture](docs/architecture.md) explains responsibilities and engine choices.
 
-Game applications are independently maintained under the `etaf-games` workspace.
-For example, `etaf-solitaire` uses OpenSpiel and `etaf-salvage` uses Godot; each
+Game applications are independently maintained under the
+[etaf-games](https://forgejo.vhkd.top/emacs-taf/etaf-games) workspace. For
+example, `etaf-solitaire` uses OpenSpiel and `etaf-salvage` uses Godot; each
 owns its entry, interface, rules configuration, resources and checks. Install
 and launch a game through its own package, not through a framework launcher.
 
 For framework development, install all three backends with
 `make engine-all GAMEKIT_PYTHON=python3.11`, then run `make check`.
+
+## License
+
+GPL-3.0-or-later; see [LICENSE](LICENSE).
