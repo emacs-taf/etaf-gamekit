@@ -39,6 +39,38 @@
   (with-current-buffer (etaf-gamekit-buffer session)
     (buffer-substring-no-properties (point-min) (point-max))))
 
+(defun etaf-gamekit-test--strip-png (file)
+  "Write a tiny valid PNG strip to FILE."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert (base64-decode-string
+             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="))
+    (write-region (point-min) (point-max) file nil 'silent)))
+
+(defun etaf-gamekit-test--display-images (buffer)
+  "Return BUFFER's displayed images top to bottom."
+  (with-current-buffer buffer
+    (let ((values nil) (position (point-min)) (end (point-max)))
+      (while (< position end)
+        (let ((next (next-single-property-change position 'display nil end)))
+          (when-let* ((value (get-text-property position 'display)))
+            (when (imagep value) (push value values)))
+          (setq position next)))
+      (nreverse values))))
+
+(defun etaf-gamekit-test--strip-files (buffer)
+  "Return BUFFER's displayed strip files top to bottom."
+  (mapcar (lambda (image) (image-property image :file))
+          (etaf-gamekit-test--display-images buffer)))
+
+(defun etaf-gamekit-test--await-strips (buffer expected)
+  "Wait until BUFFER displays exactly strip files EXPECTED."
+  (let ((deadline (+ (float-time) 5)))
+    (while (and (< (float-time) deadline)
+                (not (equal (etaf-gamekit-test--strip-files buffer) expected)))
+      (accept-process-output nil 0.01))
+    (should (equal (etaf-gamekit-test--strip-files buffer) expected))))
+
 (defun etaf-gamekit-test--peer (mode &optional validator)
   "Connect a public session to the fixture in MODE with optional VALIDATOR."
   (etaf-gamekit-define-game etaf-gamekit-test--peer-game
@@ -343,7 +375,52 @@
               "[gamekit]\ngame_script=\"res://clock.gd\"\nobservation_hz=" rate "\n"))
     directory))
 
+(defun etaf-gamekit-test--frame-project ()
+  "Create an owned Godot fixture that publishes frame strips."
+  (let ((directory (make-temp-file "gamekit-frame-project-" t)))
+    (copy-file (expand-file-name "fixtures/frame.gd" etaf-gamekit-test--directory)
+               (expand-file-name "frame.gd" directory))
+    (with-temp-file (expand-file-name "project.godot" directory)
+      (insert "config_version=5\n[application]\nrun/flush_stdout_on_print=true\n"
+              "[gamekit]\ngame_script=\"res://frame.gd\"\n"))
+    directory))
+
 (etaf-gamekit-define-game etaf-gamekit-test--clock :backend 'godot :title "Native clock")
+
+(etaf-gamekit-define-game etaf-gamekit-test--frame :backend 'godot :title "Native frame fixture")
+
+(ert-deftest etaf-gamekit-godot-publishes-only-changed-frame-strips ()
+  "The shared Godot publisher writes changed strips and describes them."
+  (let ((project (etaf-gamekit-test--frame-project))
+        (canvas (make-temp-file "gamekit-strips-" t)) session)
+    (unwind-protect
+        (progn
+          (setq session (etaf-gamekit-start etaf-gamekit-test--frame
+                                           :options (list :project project)))
+          (etaf-gamekit-test--wait session)
+          (etaf-gamekit-action session "publish"
+                               (list :directory canvas :block 16 :line 16
+                                     :width 64 :height 32 :id 1))
+          (etaf-gamekit-test--wait session (lambda ()
+                                            (equal (plist-get (plist-get (etaf-gamekit-observation session) :frame)
+                                                              :strips)
+                                                   '(1 1))))
+          (should (file-exists-p (expand-file-name "0-1.png" canvas)))
+          (should (file-exists-p (expand-file-name "1-1.png" canvas)))
+          ;; A frame changing only the top strip writes only that strip.
+          (etaf-gamekit-action session "publish"
+                               (list :directory canvas :block 16 :line 16
+                                     :width 64 :height 32 :id 2 :variant 1))
+          (etaf-gamekit-test--wait session (lambda ()
+                                            (equal (plist-get (plist-get (etaf-gamekit-observation session) :frame)
+                                                              :strips)
+                                                   '(2 1))))
+          (should (file-exists-p (expand-file-name "0-2.png" canvas)))
+          (should-not (file-exists-p (expand-file-name "1-2.png" canvas)))
+          (should-not (etaf-gamekit-last-error session)))
+      (etaf-gamekit-test--dispose session)
+      (delete-directory project t)
+      (delete-directory canvas t))))
 
 (ert-deftest etaf-gamekit-godot-project-controls-stream-cadence ()
   "A project's rate changes autonomous observation spacing, not its clock."
@@ -397,6 +474,68 @@
             (should (eq (etaf-gamekit-status session) 'failed))
             (should (string-match-p "observation_hz must be" (etaf-gamekit-last-error session))))
         (etaf-gamekit-test--dispose session) (delete-directory directory t)))))
+
+(ert-deftest etaf-gamekit-frame-canvas-shows-changed-strips ()
+  "A published frame shows strip images and replaces only changed rows."
+  (let* ((directory (make-temp-file "gamekit-frame-" t))
+         (frame (etaf-ref nil))
+         (geometry (etaf-ref (list :graphic t :density 1 :device-block 16 :device-line 16
+                                   :pixel-width 32 :columns 4 :rows 2 :ascent 82)))
+         (buffer (generate-new-buffer " *frame-canvas*")) runtime)
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (etaf-mount buffer
+                      (etaf-view
+                       (etaf-gamekit-frame-canvas
+                        :frame frame :text "text fallback" :geometry geometry
+                        :directory directory :ref 'frame-canvas))
+                      (list :viewport-width 120 :viewport-height 6))
+          (setq runtime (etaf-runtime-for-buffer buffer))
+          (etaf-gamekit-test--strip-png (expand-file-name "0-1.png" directory))
+          (etaf-gamekit-test--strip-png (expand-file-name "1-1.png" directory))
+          (setf (etaf-value frame) (list :block 16 :line 16 :width 32 :strips [1 1]))
+          (etaf-gamekit-test--await-strips buffer (list (expand-file-name "0-1.png" directory)
+                                                        (expand-file-name "1-1.png" directory)))
+          (let ((before (etaf-gamekit-test--display-images buffer)))
+            (etaf-gamekit-test--strip-png (expand-file-name "0-2.png" directory))
+            (setf (etaf-value frame) (list :block 16 :line 16 :width 32 :strips [2 1]))
+            (etaf-gamekit-test--await-strips buffer (list (expand-file-name "0-2.png" directory)
+                                                          (expand-file-name "1-1.png" directory)))
+            (let ((after (etaf-gamekit-test--display-images buffer)))
+              (should (eq (nth 1 before) (nth 1 after)))
+              (should-not (eq (nth 0 before) (nth 0 after))))))
+      (when (and runtime (etaf-runtime-mounted-p runtime)) (etaf-unmount runtime))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-directory directory t))))
+
+(ert-deftest etaf-gamekit-frame-canvas-uses-text-without-native-frames ()
+  "A text geometry shows the fallback text and follows its updates."
+  (let ((buffer (generate-new-buffer " *frame-canvas-text*"))
+        (text (etaf-ref "first line"))
+        (geometry (etaf-ref (list :graphic nil :columns 12 :rows 2))) runtime)
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (etaf-mount buffer
+                      (etaf-view
+                       (etaf-gamekit-frame-canvas
+                        :frame nil :text text :geometry geometry
+                        :directory nil :ref 'text-canvas))
+                      (list :viewport-width 120 :viewport-height 4))
+          (setq runtime (etaf-runtime-for-buffer buffer))
+          (should (string-match-p "first line"
+                                  (buffer-substring-no-properties (point-min) (point-max))))
+          (setf (etaf-value text) "second line")
+          (let ((deadline (+ (float-time) 5)))
+            (while (and (< (float-time) deadline)
+                        (not (string-match-p "second line"
+                                             (buffer-substring-no-properties (point-min) (point-max)))))
+              (accept-process-output nil 0.01)))
+          (should (string-match-p "second line"
+                                  (buffer-substring-no-properties (point-min) (point-max)))))
+      (when (and runtime (etaf-runtime-mounted-p runtime)) (etaf-unmount runtime))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (provide 'etaf-gamekit-tests)
 ;;; etaf-gamekit-tests.el ends here

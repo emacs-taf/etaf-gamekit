@@ -63,10 +63,14 @@ always has access to the latest accepted one.
 
 No universal board, story or world schema is imposed. A game supplies a schema
 or uses its adapter's documented native projection. Asset IDs resolve through
-the game's content manifest; binary media and rendered frames stay outside the
-state protocol. Applications compose ETAF image/video facilities and optional
-etaf-ui media components. GameKit currently supplies no asset downloader, audio
-mixer or network synchronization service.
+the game's content manifest; binary media stays outside the state protocol.
+A rendered canvas is published as per-line image strips, and only a small
+frame description travels in the observation. GameKit supplies the client
+canvas component and the shared Godot strip publisher; the application owns
+its geometry, artwork and the mapping from its world to the canvas.
+Applications compose ETAF image/video facilities and optional
+etaf-ui media components. GameKit currently supplies no asset downloader,
+audio mixer or network synchronization service.
 
 Intrinsic world/tile dimensions belong to the game's presentation design.
 Window adaptation reflows surrounding controls and panels without stretching
@@ -85,7 +89,9 @@ intermediate pictures that would never be displayed. A game project supplies
 commands and observations while using Godot's physics, collision, navigation
 and simulation APIs. The
 bridge runs [headlessly](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_dedicated_servers.html);
-there is no game-rendering window or video-frame transport. GameKit does not
+there is no game-rendering window and no frame transport in the process
+protocol. A rendering game publishes strips as files and reports a frame
+description, as described under state and presentation. GameKit does not
 contain that project's rules or UI.
 
 The boardgame.io adapter consumes an application-owned Game module through the

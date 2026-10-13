@@ -93,6 +93,21 @@
       "name": "etaf-gamekit-bot-policies-follow-the-game",
       "file": "tests/etaf-gamekit-tests.el",
       "purpose": "The search policy rejects a game without an evaluation while the random policy plays any turn-based kernel."
+    },
+    {
+      "name": "etaf-gamekit-frame-canvas-shows-changed-strips",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "A published frame description shows one strip image per row, and republishing replaces only the rows whose serial changed."
+    },
+    {
+      "name": "etaf-gamekit-frame-canvas-uses-text-without-native-frames",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "A text geometry shows the caller's fallback text and follows its updates without native frames."
+    },
+    {
+      "name": "etaf-gamekit-godot-publishes-only-changed-frame-strips",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "The shared Godot frame publisher writes one strip per changed row, describes their ids and leaves unchanged rows unwritten."
     }
   ]
 }

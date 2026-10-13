@@ -13,6 +13,11 @@
 
 ### Added
 
+- Native frame publication: `etaf-gamekit-frame-canvas` shows a canvas
+  published as per-line PNG strips, replacing only the rows whose publication
+  id changed and falling back to caller text on text displays. Godot projects
+  publish strips through the shared `native/godot/frame_strips.gd`, loaded from
+  the bridge directory exposed as `Engine.get_meta("gamekit_native_dir")`.
 - Godot projects can select `gamekit/observation_hz` from 1 to 60 for autonomous
   state updates; existing projects retain the 20 Hz default.
 - OpenSpiel games support bounded undo/redo, including chance outcomes and the

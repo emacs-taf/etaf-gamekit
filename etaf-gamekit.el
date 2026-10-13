@@ -117,6 +117,21 @@
 ;; SYMBOLS), sorted by name. Built-ins are godot, boardgame-io and openspiel.
 ;; Registration does not install dependencies. Game configuration and adapter
 ;; installation belong to the workflows documented in docs/manual.md.
+;;
+;; Component: etaf-gamekit-frame-canvas (&key frame text geometry directory background ref label)
+;; Show a native canvas published as per-line image strips, or TEXT.
+;; FRAME is a reactive frame description (:id ID :block DEVICE-BLOCK :line
+;; DEVICE-LINE :width DEVICE-WIDTH :strips [SERIALS...]) or nil; the producer
+;; writes strip ROW of publication SERIAL as ROW-SERIAL.png in DIRECTORY and
+;; republishes only changed strips.  GEOMETRY is a reactive plist (:graphic
+;; BOOL :density DEVICE-PIXELS-PER-LOGICAL-PIXEL :device-block DEVICE-BLOCK
+;; :device-line DEVICE-LINE :pixel-width LOGICAL-WIDTH :columns COLUMNS :rows
+;; ROWS :ascent PERCENT); frames show only when :graphic is non-nil and the
+;; frame's block, line and width match the geometry.  TEXT is the reactive
+;; fallback shown on text displays and before a matching frame arrives.  LABEL
+;; names the region and REF is the canvas Host reference.  Only changed rows
+;; decode one strip file each, and replaced images are flushed in batches, so
+;; a moving scene stays cheap.
 
 ;;; Code:
 (require 'etaf)
@@ -145,6 +160,7 @@
   (require 'etaf-gamekit-session)
   (require 'etaf-gamekit-backends)
   (require 'etaf-gamekit-game)
+  (require 'etaf-gamekit-frame)
   (require 'etaf-gamekit-view))
 (provide 'etaf-gamekit)
 ;;; etaf-gamekit.el ends here

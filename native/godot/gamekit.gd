@@ -22,6 +22,9 @@ func _initialize() -> void:
 		return
 	observation_interval = 1.0 / float(rate)
 	Engine.max_fps = 60
+	# Store the directory, not a loaded script object: Godot 4.7 aborts at exit
+	# when Engine metadata holds a GDScript.
+	Engine.set_meta("gamekit_native_dir", get_script().resource_path.get_base_dir())
 	call_deferred("_start_game")
 
 func _start_game() -> void:

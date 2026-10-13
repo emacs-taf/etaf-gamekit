@@ -98,8 +98,87 @@ rejection. Unsolicited frames cannot clear it.
 GameKit does not prescribe boards, stories or widget trees. Observations may
 contain entities, cards, inventories, timelines and asset IDs. Resolve asset
 IDs through the game's own content manifest. Compose ETAF image/video and
-etaf-ui media components as needed. Binary assets and rendered frames do not
-belong in state messages.
+etaf-ui media components as needed. Binary assets do not belong in state
+messages; a rendered canvas is published out of band and described by a small
+frame object, as the next section explains.
+
+## Publish and show native frames
+
+A game whose native kernel renders a canvas can publish it as image strips and
+show it with `etaf-gamekit-frame-canvas`. The producer writes one PNG per text
+line, and the observation carries a frame description while the application
+composes the canvas from reactive frame, geometry and fallback text inputs.
+
+The frame description is:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Id of the newest complete publication. |
+| `block` | Device pixels the producer draws one logical block in. |
+| `line` | Device pixel height of one strip. |
+| `width` | Device pixel canvas width. |
+| `strips` | Per-row publication ids, top row first. |
+
+Strip `ROW` of publication `SERIAL` is `ROW-SERIAL.png` in the canvas
+directory: `:line` device pixels tall and `:width` device pixels wide. The
+client decodes only rows whose id differs from the shown frame, so a producer
+that keeps the ids of unchanged rows republishes cheaply and owns retirement
+of old files. A row whose named file is already gone keeps its previous image.
+
+The application owns the geometry plist, and it configures the producer with
+the matching values.
+
+| Key | Meaning |
+| --- | --- |
+| `:graphic` | Non-nil to display native frames; nil shows `:text`. |
+| `:density` | Device pixels per logical pixel (the display density factor). |
+| `:device-block`, `:device-line` | Values the producer draws with. |
+| `:pixel-width` | Logical canvas width; a frame must report `:pixel-width` times `:density` as its `:width`. |
+| `:columns`, `:rows` | Host box size in character columns and text lines. |
+| `:ascent` | Image baseline percentage passed to `create-image`. |
+
+```elisp
+(etaf-gamekit-frame-canvas
+ :frame (etaf-computed (lambda () (etaf-gamekit-view session :frame)) :test #'equal)
+ :text (etaf-computed (lambda () (board-as-text)) :test #'equal)
+ :geometry (etaf-computed (lambda () (board-geometry)) :test #'equal)
+ :directory directory :label "Battlefield" :ref 'board)
+```
+
+Compute the geometry from `etaf-display-metrics` (character width, line height
+and ascent) plus the display density, and send the producer the theme and
+device block/line whenever the geometry changes. A frame that does not match
+the current geometry is ignored until the producer adopts it, so the canvas
+keeps showing the previous strips across a resize. Only a graphic geometry
+displays frames; `:text` shows on text displays and before the first matching
+frame.
+
+### Godot frame publication
+
+GameKit's Godot bridge exposes the shared strip publisher to game scripts:
+
+```gdscript
+var native_dir: String = Engine.get_meta("gamekit_native_dir")
+var FrameStrips = load(native_dir.path_join("frame_strips.gd"))
+var strips = FrameStrips.new()
+```
+
+The class composes a canvas from a background image the game paints plus an
+ordered list of draw operations, and writes only the changed strips. The game:
+
+1. calls `configure(device_block, device_line, width, height)` when the
+   geometry changes;
+2. paints `strips.base` and calls `mark_all()` or `mark_rows(top, bottom)`
+   after changing it;
+3. calls `begin()` at the start of each frame and records artwork with
+   `draw(key, image, at, source)`, where a stable `key` is what lets the
+   publisher recognize an unchanged strip;
+4. calls `publish(directory, id)`, which returns `""` or a failure message,
+   and reports `strips.description()` as the observation's `frame`.
+
+The included `native/godot/frame_strips.gd` keeps 16 file versions per strip
+and encodes on the worker pool. Artwork, layers and simulation stay the
+game's.
 
 ## Choose and configure a backend
 
@@ -143,7 +222,8 @@ acknowledged commands are independent of this rate. This setting does not
 change the game's physics rate or promise a display frame rate. Commands and
 simulation run on Godot's main thread. Godot starts with
 `--headless --no-header`; ETAF owns presentation and input. Game scripts keep
-stdout reserved for the bridge.
+stdout reserved for the bridge. A project that draws publishes frame strips as
+described in [Publish and show native frames](#publish-and-show-native-frames).
 
 ### boardgame.io
 
