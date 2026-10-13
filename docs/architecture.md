@@ -101,9 +101,12 @@ legal-action, chance, joint-action and native serialization APIs. It preserves
 the chosen player's observation and information-state boundaries rather than
 publishing an unfiltered native state. Explicit chance is resolved by an owned
 seeded RNG. Native snapshot restoration and RNG validation occur before the
-live state changes. Mean-field and sampled-stochastic games need specialized
-adapters. Discovering a native game name does not certify its frontend or all
-of its lifecycle paths.
+live state changes. A sequential kernel also advertises the `bot` operation,
+which plays one move for the side to move under the adapter's own search policy
+and reports that decision in the observation; it is an ordinary player action
+for undo, redo and snapshots. Mean-field and sampled-stochastic games need
+specialized adapters. Discovering a native game name does not certify its
+frontend or all of its lifecycle paths.
 
 ## Engine selection boundaries
 

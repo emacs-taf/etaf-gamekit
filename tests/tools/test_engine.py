@@ -239,6 +239,74 @@ class RuleKernelContracts(unittest.TestCase):
             self.assertTrue(rejected['error'])
             self.assertEqual(rejected['observation'], initial)
 
+    def test_openspiel_search_takes_wins_for_either_side(self):
+        cases = json.loads((ROOT / 'tests/fixtures/xiangqi-tactics.json').read_text())
+        for case in cases:
+            with self.subTest(player=case['player']):
+                engine, _ = self.backend('openspiel', 'xiangqi')
+                for turn, action in enumerate(case['actions']):
+                    self.assertIsNone(engine.request('set-player', player=turn % 2)['error'])
+                    self.assertIsNone(engine.request('act', action=action)['error'])
+                # Bot ownership is the side to move, not the observer's seat.
+                before = engine.request('set-player', player=1 - case['player'])['observation']
+                self.assertFalse(before['terminal'])
+                result = engine.request('bot', policy='search', depth=3, seconds=1)
+                self.assertIsNone(result['error'])
+                after = result['observation']
+                self.assertTrue(after['terminal'])
+                self.assertEqual(after['returns'][case['player']], 1)
+                self.assertIn(after['bot']['action'], case['wins'])
+                rejected = engine.request('bot', policy='search')
+                self.assertTrue(rejected['error'])
+                self.assertEqual(rejected['observation'], after)
+                self.assertFalse(engine.request('undo')['observation']['terminal'])
+                self.assertTrue(engine.request('redo')['observation']['terminal'])
+
+    def test_openspiel_search_defends_against_the_opponents_reply(self):
+        engine, _ = self.backend('openspiel', 'xiangqi')
+        actions = [5761, 2338, 8098, 1, 7533, 373, 7816, 198, 6352, 90,
+                   4723, 1192, 7990, 2003, 6352]
+        for turn, action in enumerate(actions):
+            engine.request('set-player', player=turn % 2)
+            self.assertIsNone(engine.request('act', action=action)['error'])
+        result = engine.request('bot', depth=2, seconds=1)
+        self.assertIsNone(result['error'])
+        self.assertNotIn(result['observation']['bot']['action'], [562, 1732])
+        # With one ply, red must not have a winning reply to black's defense.
+        reply = engine.request('bot', depth=1, seconds=1)
+        self.assertIsNone(reply['error'])
+        self.assertFalse(reply['observation']['terminal'])
+
+    def test_openspiel_bot_deadline_rejection_and_round_history(self):
+        engine, initial = self.backend('openspiel', 'xiangqi')
+        for args in ({'depth': 0}, {'depth': True}, {'seconds': 0},
+                     {'seconds': 20}, {'policy': 'missing'}):
+            rejected = engine.request('bot', **args)
+            self.assertTrue(rejected['error'])
+            self.assertEqual(rejected['observation'], initial)
+        result = engine.request('bot', depth=12, seconds=0.05)
+        self.assertIsNone(result['error'])
+        report = result['observation']['bot']
+        self.assertIn(report['action'], [a['id'] for a in initial['legal_actions']])
+        self.assertLess(report['elapsed'], 1)
+        self.assertLess(report['depth'], report['requested_depth'])
+        reply = engine.request('bot', policy='random')['observation']
+        self.assertEqual(reply['action_count'], 2)
+        before = dict(reply, bot=None)
+        with tempfile.TemporaryDirectory() as directory:
+            target = str(Path(directory) / 'round.snapshot')
+            self.assertIsNone(engine.request('save', path=target)['error'])
+            self.assertEqual(engine.request('undo', count=2)['observation']['action_count'], 0)
+            self.assertEqual(engine.request('redo', count=2)['observation'], before)
+            engine.request('reset')
+            self.assertEqual(engine.request('load', path=target)['observation'], before)
+        # Seeded bot choices do not consume the game's chance sampler.
+        engine.request('reset')
+        first = engine.request('bot', policy='random')['observation']
+        engine.request('undo')
+        replay = engine.request('bot', policy='random')['observation']
+        self.assertEqual(first, replay)
+
     def test_openspiel_catalog_is_discoverable_without_starting_a_game(self):
         output = subprocess.run([str(CACHE / 'openspiel/bin/python'),
                                  str(ROOT / 'native/openspiel/bridge.py'), '--list'],

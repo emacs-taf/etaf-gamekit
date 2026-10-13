@@ -83,6 +83,16 @@
       "name": "etaf-gamekit-observations-preserve-an-action-rejection",
       "file": "tests/etaf-gamekit-tests.el",
       "purpose": "An unsolicited display frame cannot erase the last action's rejection."
+    },
+    {
+      "name": "etaf-gamekit-openspiel-bot-answers-for-the-side-to-move",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "The adapter plays a requested search move for the side to move through the public action API, with its decision reported and undoable."
+    },
+    {
+      "name": "etaf-gamekit-bot-policies-follow-the-game",
+      "file": "tests/etaf-gamekit-tests.el",
+      "purpose": "The search policy rejects a game without an evaluation while the random policy plays any turn-based kernel."
     }
   ]
 }

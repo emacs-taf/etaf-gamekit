@@ -11,12 +11,15 @@ from pathlib import Path
 import random
 import sys
 import tempfile
+import time
 import pyspiel
+from xiangqi import Search
 
 VERSION = importlib.metadata.version('open-spiel')
 MAX_MESSAGE = 1024 * 1024
 MAX_SNAPSHOT = 8 * MAX_MESSAGE
 MAX_HISTORY = 128
+MAX_BOT_SECONDS = 10
 
 
 class Match:
@@ -35,6 +38,7 @@ class Match:
         self.state = self.game.new_initial_state()
         self.resolve_chance(self.state, self.random)
         self.past, self.future, self.action_count = [], [], 0
+        self.bot = None
 
     def frame(self):
         return self.state.clone(), self.random.getstate(), self.player, self.action_count
@@ -73,8 +77,63 @@ class Match:
             'observation': state.observation_string(self.player) if kind.provides_observation_string else None,
             'observation_tensor': state.observation_tensor(self.player) if kind.provides_observation_tensor else None,
             'information_state': state.information_state_string(self.player) if kind.provides_information_state_string else None,
-            'returns': state.returns(), 'rewards': state.rewards(),
+            'returns': state.returns(), 'rewards': state.rewards(), 'bot': self.bot,
         }
+
+    def supports_bot(self):
+        """Return True when this kernel can play a move for the side to move."""
+        return self.game.get_type().dynamics == pyspiel.GameType.Dynamics.SEQUENTIAL
+
+    def begin(self):
+        """Return a candidate clone and a copy of the chance sampler."""
+        if self.state.is_terminal():
+            raise ValueError('The game is over')
+        candidate = self.state.clone()
+        generator = random.Random()
+        generator.setstate(self.random.getstate())
+        return candidate, generator
+
+    def commit(self, candidate, generator):
+        """Make CANDIDATE the live state and remember its predecessor."""
+        self.resolve_chance(candidate, generator)
+        self.past.append(self.frame())
+        del self.past[:-MAX_HISTORY]
+        self.future.clear()
+        self.state, self.random = candidate, generator
+        self.action_count += 1
+        self.bot = None
+
+    def bot_move(self, args):
+        """Choose the side to move's action and describe the decision."""
+        if self.state.is_terminal():
+            raise ValueError('The game is over')
+        if self.state.is_simultaneous_node() or self.state.current_player() < 0:
+            raise ValueError('A bot move needs a turn-based player')
+        policy = args.get('policy', 'search')
+        if policy == 'random':
+            action = random.Random(self.seed * 1000003 + self.action_count).choice(self.state.legal_actions())
+            return action, {'policy': 'random', 'depth': 0, 'nodes': 0, 'score': 0, 'elapsed': 0.0}
+        if policy != 'search':
+            raise ValueError('Unsupported bot policy')
+        depth = args.get('depth', 4)
+        seconds = args.get('seconds', 1.0)
+        if type(depth) is not int or not 1 <= depth <= 12:
+            raise ValueError('Bot depth must be an integer from 1 to 12')
+        if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0.05 <= seconds <= MAX_BOT_SECONDS:
+            raise ValueError(f'Bot time must be between 0.05 and {MAX_BOT_SECONDS:g} seconds')
+        kind = self.game.get_type()
+        if not (self.game.num_players() == 2 and kind.dynamics == pyspiel.GameType.Dynamics.SEQUENTIAL
+                and kind.chance_mode == pyspiel.GameType.ChanceMode.DETERMINISTIC
+                and kind.information == pyspiel.GameType.Information.PERFECT_INFORMATION
+                and kind.utility == pyspiel.GameType.Utility.ZERO_SUM and kind.short_name == 'xiangqi'):
+            raise ValueError('The search policy needs a supported two-player perfect-information game')
+        search = Search(self.state, depth, seconds,
+                        self.seed * 1000003 + self.action_count)
+        started = time.monotonic()
+        action, score = search.run()
+        return action, {'policy': 'search', 'depth': search.completed_depth, 'requested_depth': depth,
+                        'nodes': search.nodes, 'score': score,
+                        'elapsed': round(time.monotonic() - started, 3)}
 
     def command(self, operation, args):
         if operation == 'set-player':
@@ -83,12 +142,18 @@ class Match:
             self.save(self.path(args))
         elif operation == 'load':
             self.restore(self.path(args))
+            self.bot = None
         elif operation in ('undo', 'redo'):
+            count = args.get('count', 1)
+            if type(count) is not int or not 1 <= count <= MAX_HISTORY:
+                raise ValueError('Undo/redo count must be a positive integer within the retained history')
             source, destination = (self.past, self.future) if operation == 'undo' else (self.future, self.past)
             if not source:
                 raise ValueError(f'Nothing to {operation}')
-            destination.append(self.frame())
-            self.use_frame(source.pop())
+            for _ in range(min(count, len(source))):
+                destination.append(self.frame())
+                self.use_frame(source.pop())
+            self.bot = None
         elif operation == 'reset':
             seed = args.get('seed', self.seed)
             if type(seed) is not int:
@@ -97,13 +162,9 @@ class Match:
             generator = random.Random(seed)
             self.resolve_chance(candidate, generator)
             self.state, self.random, self.seed = candidate, generator, seed
-            self.past, self.future, self.action_count = [], [], 0
+            self.past, self.future, self.action_count, self.bot = [], [], 0, None
         elif operation in ('act', 'joint-action'):
-            if self.state.is_terminal():
-                raise ValueError('The game is over')
-            candidate = self.state.clone()
-            generator = random.Random()
-            generator.setstate(self.random.getstate())
+            candidate, generator = self.begin()
             if operation == 'act':
                 action = args.get('action')
                 if candidate.is_simultaneous_node() or candidate.current_player() != self.player:
@@ -119,12 +180,19 @@ class Match:
                        for player, action in enumerate(actions)):
                     raise ValueError('Illegal joint action')
                 candidate.apply_actions(actions)
-            self.resolve_chance(candidate, generator)
-            self.past.append(self.frame())
-            del self.past[:-MAX_HISTORY]
-            self.future.clear()
-            self.state, self.random = candidate, generator
-            self.action_count += 1
+            self.commit(candidate, generator)
+        elif operation == 'bot':
+            action, report = self.bot_move(args)
+            candidate, generator = self.begin()
+            player = candidate.current_player()
+            if candidate.is_simultaneous_node() or player < 0:
+                raise ValueError('A bot move needs a turn-based player')
+            if action not in candidate.legal_actions(player):
+                raise ValueError('The bot policy returned an illegal action')
+            label = candidate.action_to_string(player, action)
+            candidate.apply_action(action)
+            self.commit(candidate, generator)
+            self.bot = dict(report, action=action, label=label)
         else:
             raise ValueError('Unsupported game operation')
 
@@ -211,6 +279,8 @@ def main():
     revision = previous_id = 0
     connected = False
     capabilities = ['act', 'joint-action', 'set-player', 'undo', 'redo', 'reset', 'save', 'load']
+    if match.supports_bot():
+        capabilities.append('bot')
     while True:
         raw = sys.stdin.buffer.readline(MAX_MESSAGE + 2)
         if not raw:

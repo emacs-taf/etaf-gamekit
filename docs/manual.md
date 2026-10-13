@@ -213,16 +213,40 @@ native facts into its own interface.
 | `act` | Integer `:action`, legal for the currently selected active player |
 | `joint-action` | `:actions` vector with one legal action per player |
 | `set-player` | Integer `:player` perspective for local play |
-| `undo`, `redo` | None; restore the preceding/following accepted player action, chance state and perspective |
+| `bot` | `:policy` (`search` or `random`) plus the search budget: integer `:depth` plies and number `:seconds` |
+| `undo`, `redo` | Optional integer `:count` (default 1); restore that many preceding/following accepted player actions, chance state and perspective |
 | `reset` | Optional integer `:seed`; reset the native state, using that seed or the current seed |
 | `save`, `load` | `:path` to an opaque local snapshot |
+
+Sequential kernels advertise `bot`, which plays one move for the side to move
+regardless of the perspective `set-player` selected, so a frontend can let a
+local opponent answer on its own turn. The `search` policy uses iterative
+alpha-beta over native legal moves, with material and soldier advancement as a
+bounded evaluation; native terminal wins always outrank material gains. This
+casual opponent currently supports xiangqi, not a tournament-strength engine.
+`:depth` defaults to 4 and accepts integers 1–12; `:seconds` defaults to 1 and
+accepts 0.05–10. Search runs in the backend process, not Emacs. On deadline it
+uses the last completed iteration, or a legal fallback if none completed.
+The caller's request timeout must exceed the budget plus transport overhead.
+`random` chooses a uniformly random legal action in any sequential kernel.
+Bot tie-breaking uses the match seed and action count, without consuming the
+chance sampler. Repeatability requires the same completed search depth.
+
+The observation's `bot` field reports the last bot decision: policy, requested
+and completed depth (`requested_depth`/`depth`), nodes, score, elapsed seconds,
+action and label. The random policy reports depth zero and has no search budget.
+Diagnostics clear after manual play, history navigation, reset or load; they are
+not saved. The move itself is an ordinary player action for undo, redo and
+snapshots. Rejected searches retain the position and last diagnostic.
 
 Observations also contain `can_undo`, `can_redo` and `action_count`. The adapter
 retains up to 128 player-action checkpoints. Undo includes resolved chance and
 the acting player's perspective; changing perspective alone is not a turn.
-A new action after undo discards redo history. Reset clears both histories;
-a different seed starts a new deal for stochastic games. Rejected operations
-preserve the state, sampler and histories.
+`undo` and `redo` take an optional integer `:count`, clamped to the available
+history, so a frontend can restore a whole local round without observing
+intermediate positions. A new action after undo discards redo history. Reset
+clears both histories; a different seed starts a new deal for stochastic games.
+Rejected operations preserve the state, sampler and histories.
 
 Snapshots use OpenSpiel's native game/state serialization and preserve the
 adapter's chance RNG and undo/redo histories. Loading validates every candidate

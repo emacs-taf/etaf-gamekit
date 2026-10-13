@@ -17,6 +17,10 @@
   state updates; existing projects retain the 20 Hz default.
 - OpenSpiel games support bounded undo/redo, including chance outcomes and the
   acting player's perspective. Reset accepts an explicit seed for a new deal.
+- The OpenSpiel adapter advertises a `bot` operation that plays one move for the
+  side to move: a time-bounded alpha-beta search for xiangqi, and a uniform
+  random policy for any turn-based kernel. `undo` and `redo` accept a `:count`
+  so a frontend can restore a whole local round in one step.
 
 ### Changed
 

@@ -65,6 +65,10 @@
   :title "Poker rules" :backend 'openspiel
   :options '(:game "kuhn_poker" :player 0 :seed 42))
 
+(etaf-gamekit-define-game etaf-gamekit-test--xiangqi
+  :title "Xiangqi rules" :backend 'openspiel
+  :options '(:game "xiangqi" :player 0 :seed 7))
+
 (ert-deftest etaf-gamekit-game-definitions-create-independent-instances ()
   "A game definition creates independent worlds and supplies its view metadata."
   (etaf-gamekit-define-game etaf-gamekit-test--independent
@@ -173,6 +177,47 @@
                 (should-not (etaf-gamekit-last-error session)))
               (should (equal (etaf-gamekit-observation session) before))))
         (etaf-gamekit-test--dispose session) (delete-file file)))))
+
+(ert-deftest etaf-gamekit-openspiel-bot-answers-for-the-side-to-move ()
+  "The OpenSpiel adapter plays a search move and keeps it undoable."
+  (let ((session (etaf-gamekit-start etaf-gamekit-test--xiangqi)))
+    (unwind-protect
+        (progn
+          (etaf-gamekit-test--wait session)
+          (should (member "bot" (etaf-gamekit-capabilities session)))
+          (etaf-gamekit-action session "bot" '(:policy "search" :depth 3 :seconds 1))
+          (etaf-gamekit-test--wait session)
+          (should-not (etaf-gamekit-last-error session))
+          (let* ((observation (etaf-gamekit-observation session))
+                 (report (plist-get observation :bot)))
+            (should (= 1 (plist-get observation :action_count)))
+            (should (= 1 (plist-get observation :current_player)))
+            (should (eq t (plist-get observation :can_undo)))
+            (should (equal "search" (plist-get report :policy)))
+            (should (= 3 (plist-get report :depth)))
+            (should (stringp (plist-get report :label))))
+          (etaf-gamekit-action session "undo" '(:count 2))
+          (etaf-gamekit-test--wait session)
+          (should-not (etaf-gamekit-last-error session))
+          (should (= 0 (plist-get (etaf-gamekit-observation session) :action_count)))
+          (should (eq t (plist-get (etaf-gamekit-observation session) :can_redo))))
+      (etaf-gamekit-test--dispose session))))
+
+(ert-deftest etaf-gamekit-bot-policies-follow-the-game ()
+  "The search policy needs a supported evaluation; random plays any turn-based game."
+  (let ((session (etaf-gamekit-start etaf-gamekit-test--poker)))
+    (unwind-protect
+        (progn
+          (etaf-gamekit-test--wait session)
+          (should (member "bot" (etaf-gamekit-capabilities session)))
+          (etaf-gamekit-action session "bot" '(:policy "search" :depth 2 :seconds 1))
+          (etaf-gamekit-test--wait session)
+          (should (etaf-gamekit-last-error session))
+          (etaf-gamekit-action session "bot" '(:policy "random"))
+          (etaf-gamekit-test--wait session)
+          (should-not (etaf-gamekit-last-error session))
+          (should (= 1 (plist-get (etaf-gamekit-observation session) :action_count))))
+      (etaf-gamekit-test--dispose session))))
 
 (ert-deftest etaf-gamekit-transport-fragments-detached-values-and-bounded-input ()
   "Fragments decode safely, reads detach ownership and eight inputs retain order."
