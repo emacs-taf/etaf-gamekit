@@ -95,6 +95,65 @@ request begins when sent, and defaults to 15 seconds through
 `etaf-gamekit-request-timeout`. A successful acknowledgment clears the previous
 rejection. Unsolicited frames cannot clear it.
 
+A `ready` status means that backend responses have been accepted, not that
+coalesced display publication has completed. After an action, an observation
+can already describe the next screen while `etaf-gamekit-view` and the painted
+controls still describe the previous one. Before a verification script sends
+UI input, wait for the expected accepted state **and** the relevant published
+view/target. Do not replace this condition with a fixed sleep or a larger timeout.
+
+For bounded integration scripts, use a predicate over public observations and
+view fields. This helper is for the outer control loop, not a render function or
+an event callback; normal application views remain reactive:
+
+```elisp
+;;; -*- lexical-binding: t; -*-
+(defun my-game-await (instance published-p &optional seconds)
+  "Await INSTANCE and PUBLISHED-P, or report its rejection/failure/deadline."
+  (let ((deadline (+ (float-time) (or seconds 5))))
+    (while
+        (progn
+          (when (memq (etaf-gamekit-status instance) '(failed closed))
+            (error "Game is %s: %s" (etaf-gamekit-status instance)
+                   (or (etaf-gamekit-last-error instance) "no live instance")))
+          (when-let* ((reason (etaf-gamekit-last-error instance)))
+            (error "Game action rejected: %s" reason))
+          (not (and (eq (etaf-gamekit-status instance) 'ready)
+                    (funcall published-p))))
+      (when (>= (float-time) deadline)
+        (error "Expected game view was not published before the deadline"))
+      (accept-process-output nil 0.01)))
+  t)
+
+;; With my-poker-game from the example above:
+(let ((instance (etaf-gamekit-start my-poker-game)))
+  (unwind-protect
+      (progn
+        (my-game-await
+         instance (lambda () (and (etaf-gamekit-capabilities instance)
+                                   (etaf-gamekit-view instance :legal_actions))))
+        (let* ((next (1+ (plist-get (etaf-gamekit-observation instance) :action_count)))
+               (action (car (etaf-gamekit-view instance :legal_actions))))
+          (etaf-gamekit-action instance "act" (list :action (plist-get action :id)))
+          (my-game-await
+           instance (lambda ()
+                      (and (equal next (plist-get (etaf-gamekit-observation instance)
+                                                  :action_count))
+                           (equal next (etaf-gamekit-view instance :action_count)))))))
+    (etaf-gamekit-close instance)
+    (kill-buffer (etaf-gamekit-buffer instance))))
+```
+
+For a screen transition, compare its application-defined phase in both state
+surfaces rather than requiring whole-observation equality: a real-time stream
+may skip intermediate display frames. If the next input needs a specific Host,
+include its published availability in the predicate through ETAF's public
+queries. A non-nil `etaf-host-ref-position` alone is not enough: require a
+nonempty `etaf-host-ref-bounds` span, the expected enabled props, and visibility
+in the window receiving native input. Re-resolve the target after publication;
+never keep old buffer positions across a screen change. A rejected action or
+failed/closed instance is a failure, not a reason to keep waiting or retry it.
+
 GameKit does not prescribe boards, stories or widget trees. Observations may
 contain entities, cards, inventories, timelines and asset IDs. Resolve asset
 IDs through the game's own content manifest. Compose ETAF image/video and
