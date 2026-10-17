@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Frame-canvas image release declares `image-flush` to the byte compiler, so
+  Emacs 29/30 builds no longer report the function as unknown while the
+  runtime `require 'image` keeps it available.
 - Frame-canvas image release requires the built-in `image` library, so
   `image-flush` is known at byte-compilation time and available at runtime on
   a fresh installation.
