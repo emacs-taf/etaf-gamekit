@@ -17,6 +17,7 @@
 ;;; Code:
 (require 'cl-lib)
 (require 'etaf)
+(require 'image)
 
 (defconst etaf-gamekit--frame-canvas-flush-batch 10
   "Frames shown before replaced strip images leave Emacs's image cache.

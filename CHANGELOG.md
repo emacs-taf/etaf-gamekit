@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Frame-canvas image release requires the built-in `image` library, so
+  `image-flush` is known at byte-compilation time and available at runtime on
+  a fresh installation.
 - JSON configuration validation marks its serialization check as side-effect
   only, avoiding an unused-value byte-compiler warning on Emacs 29 and 30.
 - Godot applies queued commands before physics and flushes a tick's ordered
