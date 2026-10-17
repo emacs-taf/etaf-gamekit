@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- JSON configuration validation marks its serialization check as side-effect
+  only, avoiding an unused-value byte-compiler warning on Emacs 29 and 30.
 - Godot applies queued commands before physics and flushes a tick's ordered
   replies together, allowing combined controls to share presentation work.
 - Streamed states no longer incur another full publication delay when the

@@ -2,7 +2,7 @@
 ;;; etaf-gamekit.el --- Framework for games with native ETAF presentation
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
-;; Version: 0.1.1
+;; Version: 0.1.2
 ;; Package-Requires: ((emacs "29.1") (etaf "0.2.1"))
 ;; Keywords: games
 

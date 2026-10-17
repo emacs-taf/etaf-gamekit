@@ -13,9 +13,11 @@
   (unless (and (proper-list-p options) (zerop (% (length options) 2))
                (cl-loop for (key _value) on options by #'cddr always (keywordp key)))
     (signal 'etaf-gamekit-error '("Game options must be a keyword plist")))
-  (condition-case failure
-      (json-serialize (or options (make-hash-table)) :false-object :false)
-    (error (signal 'etaf-gamekit-error (list (error-message-string failure)))))
+  ;; The serialization only validates OPTIONS; its string is not retained.
+  (ignore
+   (condition-case failure
+       (json-serialize (or options (make-hash-table)) :false-object :false)
+     (error (signal 'etaf-gamekit-error (list (error-message-string failure))))))
   (etaf-gamekit--copy options))
 
 (cl-defun etaf-gamekit--define-game (name &key title backend options view validate)
