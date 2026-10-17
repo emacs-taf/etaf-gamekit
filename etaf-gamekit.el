@@ -2,7 +2,7 @@
 ;;; etaf-gamekit.el --- Framework for games with native ETAF presentation
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Package-Requires: ((emacs "29.1") (etaf "0.2.1"))
 ;; Keywords: games
 
@@ -156,6 +156,16 @@
   "Python executable with the pinned OpenSpiel package installed."
   :type 'string :group 'etaf-gamekit)
 (define-error 'etaf-gamekit-error "ETAF game error")
+;; Installed archives compile each module separately, so `lisp' must already be
+;; on `load-path' while the byte compiler runs, not only when this entry loads.
+;;;###autoload
+(eval-and-compile
+  (add-to-list 'load-path
+               (expand-file-name "lisp"
+                                 (file-name-directory
+                                  (or load-file-name
+                                      (bound-and-true-p byte-compile-current-file)
+                                      buffer-file-name)))))
 (let ((load-path (cons (expand-file-name "lisp" etaf-gamekit--directory) load-path)))
   (require 'etaf-gamekit-session)
   (require 'etaf-gamekit-backends)
