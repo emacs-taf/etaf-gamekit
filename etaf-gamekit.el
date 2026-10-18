@@ -44,16 +44,25 @@
 ;; must return exactly t. Definition starts no process or application mount.
 ;; Each game's own package keeps its rules, assets, UI and launch command.
 ;;
-;; Function: etaf-gamekit-start (game &key buffer options)
+;; Function: etaf-gamekit-start (game &key buffer options (display t))
 ;;;###autoload (autoload 'etaf-gamekit-start "etaf-gamekit" nil nil)
 ;; Start an independent instance of GAME, a value defined with define-game.
 ;; Return its opaque session. OPTIONS overrides the game's backend options for
 ;; this instance without changing the definition. BUFFER is an empty, unmounted
 ;; buffer or name; omitted creates a fresh buffer named after the game title.
+;; DISPLAY mounts the presentation into BUFFER; pass nil when a host window
+;; renders this session through GAME's view, so one session is mounted once
+;; and its rendering stays independent of every other app window.
 ;; This function does not select a window. Startup is asynchronous. Invalid
 ;; configuration signals etaf-gamekit-error before launching; schema rejection,
 ;; deadline and transport failures are observable through status/last-error.
 ;; Killing or unmounting the buffer releases the owned process and timers.
+;;
+;; Function: etaf-gamekit-display (session)
+;;;###autoload (autoload 'etaf-gamekit-display "etaf-gamekit-view" nil nil)
+;; Mount SESSION's presentation into its own buffer and return that buffer.
+;; A session is displayed at most once: a hosted session passes :display nil
+;; to `etaf-gamekit-start' and is rendered by exactly one host window instead.
 ;;
 ;; Function: etaf-gamekit-game-info (session)
 ;; Return detached (:name SYMBOL :title STRING :backend SYMBOL) metadata for

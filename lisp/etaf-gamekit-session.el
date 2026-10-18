@@ -12,6 +12,7 @@
 
 (cl-defstruct (etaf-gamekit--session (:constructor etaf-gamekit--make-session))
   process buffer stderr timer deadline reaper presentation validator game-info (input "") (next-id 0) pending
+  displayed
   (revision 0) (published-at 0) capabilities observation error (status 'starting)
   (view-ref (etaf-ref nil :test #'equal)) (capabilities-ref (etaf-ref nil :test #'equal)) (status-ref (etaf-ref "Starting game…"))
   (error-ref (etaf-ref "")))
@@ -60,19 +61,17 @@
   "Publish SESSION's newest accepted projection in one reactive batch."
   (setf (etaf-gamekit--session-timer session) nil
         (etaf-gamekit--session-published-at session) (float-time))
-  (when (and (buffer-live-p (etaf-gamekit-buffer session))
-             (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
-    (etaf-batch
-      (setf (etaf-value (etaf-gamekit--session-view-ref session))
-            (etaf-gamekit--session-observation session)
-            (etaf-value (etaf-gamekit--session-status-ref session))
-            (pcase (etaf-gamekit-status session)
-              ('starting "Starting game…") ('busy "Applying action…")
-              ('failed "Game disconnected") ('closed "Closed") (_ "Ready"))
-            (etaf-value (etaf-gamekit--session-error-ref session))
-            (or (etaf-gamekit-last-error session) "")
-            (etaf-value (etaf-gamekit--session-capabilities-ref session))
-            (etaf-gamekit--session-capabilities session)))))
+  (etaf-batch
+    (setf (etaf-value (etaf-gamekit--session-view-ref session))
+          (etaf-gamekit--session-observation session)
+          (etaf-value (etaf-gamekit--session-status-ref session))
+          (pcase (etaf-gamekit-status session)
+            ('starting "Starting game…") ('busy "Applying action…")
+            ('failed "Game disconnected") ('closed "Closed") (_ "Ready"))
+          (etaf-value (etaf-gamekit--session-error-ref session))
+          (or (etaf-gamekit-last-error session) "")
+          (etaf-value (etaf-gamekit--session-capabilities-ref session))
+          (etaf-gamekit--session-capabilities session))))
 
 (defun etaf-gamekit--schedule (session &optional immediate)
   "Coalesce streamed observations; publish acknowledged input promptly."
@@ -244,8 +243,10 @@
         (etaf-unmount runtime))))
   nil)
 
-(defun etaf-gamekit--start (command buffer view validate game-info)
-  "Create one game instance with COMMAND, BUFFER, VIEW, VALIDATE and GAME-INFO."
+(defun etaf-gamekit--start (command buffer view validate game-info &optional display)
+  "Create one game instance with COMMAND, BUFFER, VIEW, VALIDATE and GAME-INFO.
+DISPLAY non-nil mounts the presentation into BUFFER; a hosted session passes
+nil and lets its one host render the same session instead."
   (unless (and (numberp etaf-gamekit-request-timeout) (> etaf-gamekit-request-timeout 0)
                (consp command) (proper-list-p command) (cl-every #'stringp command)
                (or (null view) (functionp view))
@@ -261,7 +262,8 @@
         (progn
           (setf (etaf-gamekit--session-stderr session) (generate-new-buffer " *Game engine stderr*"))
           (with-current-buffer buffer (setq-local truncate-lines t))
-          (etaf-gamekit--mount session)
+          (when display (etaf-gamekit--mount session))
+          (setf (etaf-gamekit--session-displayed session) (and display t))
           (with-current-buffer buffer
             (add-hook 'kill-buffer-hook (lambda () (etaf-gamekit-close session)) nil t))
           (setf (etaf-gamekit--session-process session)

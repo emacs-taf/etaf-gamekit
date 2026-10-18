@@ -537,5 +537,26 @@
       (when (and runtime (etaf-runtime-mounted-p runtime)) (etaf-unmount runtime))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
+(ert-deftest etaf-gamekit-hosted-session-mounts-nothing-and-still-publishes ()
+  "A session started with :display nil leaves rendering to its one host."
+  (etaf-gamekit-define-game etaf-gamekit-test--hosted
+    :title "Hosted game" :backend 'gamekit-test-peer :options '(:mode "split")
+    :view (lambda (_session) (etaf-view (text "hosted"))))
+  (let ((session nil))
+    (unwind-protect
+        (progn
+          (setq session (etaf-gamekit-start etaf-gamekit-test--hosted :display nil))
+          (etaf-gamekit-test--wait session)
+          ;; The session owns state only: its own buffer stays unmounted, so
+          ;; the single host that renders it stays the only rendering.
+          (should-not (etaf-runtime-for-buffer (etaf-gamekit-buffer session)))
+          ;; State still publishes: the reactive view a host reads updates
+          ;; without the session mounting anything itself.
+          (etaf-gamekit-action session "step")
+          (etaf-gamekit-test--wait session)
+          (should (= (plist-get (etaf-gamekit-view session) :count) 1))
+          (should (eq (etaf-gamekit-status session) 'ready)))
+      (etaf-gamekit-test--dispose session))))
+
 (provide 'etaf-gamekit-tests)
 ;;; etaf-gamekit-tests.el ends here

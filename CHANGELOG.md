@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- A game session owns state; rendering belongs to exactly one host.
+  `etaf-gamekit-start` gained `:display` (default t) and
+  `etaf-gamekit-display` mounts the presentation into the session buffer at
+  most once. A session started with `:display nil` keeps its buffer unmounted
+  so a host window renders that one instance, and publications no longer
+  depend on the session buffer having a Runtime.
+
 ### Fixed
 
 - Frame-canvas image release declares `image-flush` to the byte compiler, so

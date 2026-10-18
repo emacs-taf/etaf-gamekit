@@ -41,8 +41,10 @@
   "Return detached name, title and backend metadata for running game SESSION."
   (etaf-gamekit--copy (etaf-gamekit--session-game-info session)))
 
-(cl-defun etaf-gamekit-start (game &key buffer options)
-  "Start an independent instance of GAME in BUFFER, overriding its OPTIONS."
+(cl-defun etaf-gamekit-start (game &key buffer options (display t))
+  "Start an independent instance of GAME in BUFFER, overriding its OPTIONS.
+DISPLAY mounts the presentation into BUFFER; pass nil when a host window
+renders this session with GAME's view, so the session is mounted once."
   (unless (etaf-gamekit--game-p game)
     (signal 'etaf-gamekit-error '("Start requires a game defined with etaf-gamekit-define-game")))
   (let ((configuration (etaf-gamekit--copy (etaf-gamekit--game-options game)))
@@ -57,7 +59,7 @@
                            (or buffer (generate-new-buffer-name
                                        (format "*%s*" (etaf-gamekit--game-title game))))
                            (etaf-gamekit--game-view game) (etaf-gamekit--game-validate game)
-                           (etaf-gamekit--copy info)))))
+                           (etaf-gamekit--copy info) display))))
 
 (provide 'etaf-gamekit-game)
 ;;; etaf-gamekit-game.el ends here
