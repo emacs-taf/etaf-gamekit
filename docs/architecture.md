@@ -28,8 +28,8 @@ flowchart LR
 The framework has no application launcher, game menu, theme or game-specific
 view. Requiring its entry loads ETAF and the generic framework modules only.
 It does not load etaf-ui or any game application. Applications require the
-catalog when they need it. Games live in independent repositories under the
-`etaf-games` workspace and consume only the framework's declared public APIs.
+catalog when they need it. Games live in independent repositories beside the framework packages and
+consume only the framework's declared public APIs.
 Their rules, presentation, GUI scenarios and game-specific workloads belong
 to those repositories; framework fixtures exercise generic backend contracts.
 

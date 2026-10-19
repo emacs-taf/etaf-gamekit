@@ -62,7 +62,7 @@ A view factory receives the running instance and returns any ETAF View.
 during its first render. Use local component refs for selection, dialogs and
 unsent input. Authoritative game state remains behind the backend adapter.
 
-Game applications are independent packages in the `etaf-games` workspace.
+Game applications are independent packages beside the framework packages.
 For example, Salvage Station keeps its Godot project and complete ETAF interface
 in `etaf-salvage`; GameKit contains no game-specific launcher or presentation.
 
