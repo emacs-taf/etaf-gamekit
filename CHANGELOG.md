@@ -4,6 +4,12 @@
 
 ### Changed
 
+- A presentation mounts as its buffer's ETAF application, so the application
+  record owns the lifetime and killing the buffer releases the session. The
+  kit requires etaf 0.3.0 and etaf-ui 0.2.0; games keep the mode line they
+  had, so the rows a presentation computes do not shift.
+
+
 - A game session owns state; rendering belongs to exactly one host.
   `etaf-gamekit-start` gained `:display` (default t) and
   `etaf-gamekit-display` mounts the presentation into the session buffer at

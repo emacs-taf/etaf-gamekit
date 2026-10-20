@@ -18,8 +18,18 @@
         (text (expr (or (etaf-gamekit-last-error session) ""))))))))
 
 (defun etaf-gamekit--mount (session)
-  "Mount SESSION's presentation with an owned lifetime boundary."
-  (etaf-mount (etaf-gamekit-buffer session) (etaf-view (etaf-gamekit--root :session session))))
+  "Mount SESSION's presentation as its buffer's ETAF application.
+The application record owns the lifetime: killing the buffer or closing the
+application releases the session through `etaf-gamekit-close'."
+  (etaf-app-open (buffer-name (etaf-gamekit-buffer session))
+                 (etaf-view (etaf-gamekit--root :session session))
+                 :state session
+                 ;; Games keep the mode line they had before the application
+                 ;; runtime, so the canvas rows a presentation computes do not
+                 ;; shift under it.
+                 :mode-line t
+                 :display nil
+                 :on-close (lambda () (etaf-gamekit-close session))))
 
 (defun etaf-gamekit-display (session)
   "Show SESSION's presentation in its own buffer and return the buffer.

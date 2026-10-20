@@ -261,11 +261,8 @@ nil and lets its one host render the same session instead."
     (condition-case failure
         (progn
           (setf (etaf-gamekit--session-stderr session) (generate-new-buffer " *Game engine stderr*"))
-          (with-current-buffer buffer (setq-local truncate-lines t))
           (when display (etaf-gamekit--mount session))
           (setf (etaf-gamekit--session-displayed session) (and display t))
-          (with-current-buffer buffer
-            (add-hook 'kill-buffer-hook (lambda () (etaf-gamekit-close session)) nil t))
           (setf (etaf-gamekit--session-process session)
                 (make-process
                  :name (generate-new-buffer-name "etaf-gamekit-engine")
