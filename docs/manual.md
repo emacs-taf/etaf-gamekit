@@ -246,13 +246,23 @@ complete `make check` needs all included backends.
 
 ### Godot
 
-`make engine` installs the pinned official release after SHA-256 verification.
-Python 3.9+ performs setup. The installer supports macOS universal and Linux
-x86-64/arm64. `python3 scripts/setup-engine.py --godot /path/to/godot` registers
-an existing Godot 4.7+ executable. Files stay under
-`~/.cache/emacs-taf/game-engines`, respecting `XDG_CACHE_HOME`; `--cache DIRECTORY`
-selects another cache, after which `etaf-gamekit-godot-program` must point to its
-`bin/godot`. Setup does not change PATH or Emacs init.
+`M-x etaf-gamekit-install-godot` installs the pinned official release after
+SHA-256 verification, from an archive installation or a checkout, because the
+package ships the setup script. Installation runs in the background: progress
+goes to `*ETAF engine install*` and the echo area reports the result. One run
+happens at a time, a cached archive that cannot verify is dropped before the
+retry, and a failure keeps an already working runtime in place. With a prefix
+argument the command registers an existing Godot 4.7+ executable instead of
+downloading. Python 3.9+ performs setup. The installer supports macOS universal
+and Linux x86-64/arm64.
+
+A source checkout reaches the same result from the shell: `make engine`
+downloads the pinned release, and
+`python3 native/godot/install-godot.py --godot /path/to/godot` registers an
+existing executable. Files stay under `~/.cache/emacs-taf/game-engines`,
+respecting `XDG_CACHE_HOME`; `--cache DIRECTORY` selects another cache, after
+which `etaf-gamekit-godot-program` must point to its `bin/godot`. Setup does
+not change PATH or Emacs init.
 
 A game definition uses `:backend 'godot` and
 `:options (list :project "/path/to/my-game/godot-project")`.

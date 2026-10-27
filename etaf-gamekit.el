@@ -2,7 +2,7 @@
 ;;; etaf-gamekit.el --- Framework for games with native ETAF presentation
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
-;; Version: 0.1.5
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1") (etaf "0.3.0") (etaf-ui "0.2.0"))
 ;; Keywords: games
 
@@ -20,7 +20,8 @@
 ;;
 ;; Variable: etaf-gamekit-godot-program
 ;; Godot 4.7+ executable or PATH command. Defaults to the pinned cache install
-;; from scripts/setup-engine.py. Set before opening a Godot session.
+;; from native/godot/install-godot.py, which etaf-gamekit-install-godot runs. Set
+;; before opening a Godot session.
 ;;
 ;; Variable: etaf-gamekit-request-timeout
 ;; Positive startup/action deadline in seconds (default 15). Timeout fails the
@@ -33,6 +34,17 @@
 ;; Variable: etaf-gamekit-openspiel-python-program
 ;; Python executable with OpenSpiel installed. Defaults to the isolated cache
 ;; environment created by make engine-openspiel; configure before opening.
+;;
+;; Function: etaf-gamekit-install-godot (&optional godot)
+;;;###autoload (autoload 'etaf-gamekit-install-godot "etaf-gamekit-engines" nil t)
+;; Install the pinned Godot runtime that GameKit games run. The packaged setup
+;; script verifies the release's SHA-256 before unpacking and writes only under
+;; ~/.cache/emacs-taf/game-engines, honouring XDG_CACHE_HOME; it runs no package
+;; manager and leaves PATH and init files alone. GODOT registers an existing
+;; Godot 4.7 or newer executable instead of downloading the pinned release.
+;; Installation runs in the background: progress goes to *ETAF engine install*
+;; and the echo area reports the result. One run happens at a time, and a
+;; failure keeps an already working runtime in place.
 ;;
 ;; Macro: etaf-gamekit-define-game (name &rest properties)
 ;;;###autoload (autoload 'etaf-gamekit-define-game "etaf-gamekit" nil nil 'macro)
@@ -178,6 +190,7 @@
 (let ((load-path (cons (expand-file-name "lisp" etaf-gamekit--directory) load-path)))
   (require 'etaf-gamekit-session)
   (require 'etaf-gamekit-backends)
+  (require 'etaf-gamekit-engines)
   (require 'etaf-gamekit-game)
   (require 'etaf-gamekit-frame)
   (require 'etaf-gamekit-view))

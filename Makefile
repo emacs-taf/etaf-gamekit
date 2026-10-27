@@ -4,7 +4,7 @@ EMACS ?= emacs
 GAMEKIT_PYTHON ?= python3
 GAMEKIT_CACHE ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/emacs-taf/game-engines
 LOAD_PATH = -L . -L lisp -L ../etaf-ui -L ../etaf -L ../ebox -L ../ecss
-SOURCES = lisp/etaf-gamekit-session.el lisp/etaf-gamekit-backends.el lisp/etaf-gamekit-game.el lisp/etaf-gamekit-frame.el lisp/etaf-gamekit-view.el etaf-gamekit.el benchmarks/performance-scenarios.el tests/etaf-gamekit-tests.el
+SOURCES = lisp/etaf-gamekit-session.el lisp/etaf-gamekit-backends.el lisp/etaf-gamekit-engines.el lisp/etaf-gamekit-game.el lisp/etaf-gamekit-frame.el lisp/etaf-gamekit-view.el etaf-gamekit.el benchmarks/performance-scenarios.el tests/etaf-gamekit-tests.el
 
 .PHONY: compile test check clean structure-check setup-hooks acceptance api-check engine engine-check tool-test engine-all engine-boardgame-io engine-openspiel
 compile: clean
@@ -12,7 +12,7 @@ compile: clean
 structure-check:
 	python3 scripts/check-repository.py
 engine:
-	python3 scripts/setup-engine.py
+	python3 native/godot/install-godot.py
 engine-boardgame-io:
 	npm ci --prefix native/boardgame-io --ignore-scripts --no-audit --no-fund
 engine-openspiel:
@@ -21,7 +21,7 @@ engine-openspiel:
 	"$(GAMEKIT_CACHE)/openspiel/bin/python" -m pip install -r native/openspiel/requirements.txt
 engine-all: engine engine-boardgame-io engine-openspiel
 engine-check:
-	python3 scripts/setup-engine.py --check
+	python3 native/godot/install-godot.py --check
 	node native/boardgame-io/bridge.cjs --version
 	"$(GAMEKIT_CACHE)/openspiel/bin/python" native/openspiel/bridge.py --version
 acceptance: engine-check

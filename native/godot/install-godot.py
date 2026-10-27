@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import platform
 import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -16,8 +15,7 @@ import tempfile
 import urllib.request
 import zipfile
 
-ROOT = Path(__file__).resolve().parents[1]
-SOURCES = json.loads((ROOT / 'scripts/engine-sources.json').read_text())
+SOURCES = json.loads((Path(__file__).resolve().parent / 'engine-sources.json').read_text())
 
 
 def version(program):
@@ -27,6 +25,24 @@ def version(program):
     if not found or tuple(map(int, found.groups())) < (4, 7, 0):
         raise ValueError('Godot 4.7 or newer is required')
     return result.stdout.strip()
+
+
+def download(source, destination):
+    """Download SOURCE to DESTINATION and accept it only when its bytes match."""
+    pending = destination.with_suffix('.partial')
+    with urllib.request.urlopen(source['url'], timeout=60) as response, pending.open('wb') as out:
+        announced = response.headers.get('Content-Length')
+        written = 0
+        while chunk := response.read(1 << 20):
+            out.write(chunk)
+            written += len(chunk)
+    if announced is not None and written != int(announced):
+        pending.unlink()
+        raise ValueError(f'Incomplete download: {written} of {announced} bytes; retry')
+    if hashlib.sha256(pending.read_bytes()).hexdigest() != source['sha256']:
+        pending.unlink()
+        raise ValueError('Checksum mismatch: the release download did not match the pinned SHA-256')
+    pending.replace(destination)
 
 
 def install(cache):
@@ -43,13 +59,12 @@ def install(cache):
     if target.exists():
         raise ValueError(f'Incomplete installation exists: {target}; move it aside and retry')
     archive = cache / source['url'].rsplit('/', 1)[-1]
+    # A leftover archive from an interrupted or intercepted download can never
+    # pass verification, and keeping it made every retry fail the same way.
+    if archive.exists() and hashlib.sha256(archive.read_bytes()).hexdigest() != source['sha256']:
+        archive.unlink()
     if not archive.exists():
-        pending = archive.with_suffix('.partial')
-        with urllib.request.urlopen(source['url'], timeout=60) as response, pending.open('wb') as out:
-            shutil.copyfileobj(response, out)
-        pending.replace(archive)
-    if hashlib.sha256(archive.read_bytes()).hexdigest() != source['sha256']:
-        raise ValueError(f'Checksum mismatch: remove {archive} and retry')
+        download(source, archive)
     with tempfile.TemporaryDirectory(dir=cache) as temporary:
         stage = Path(temporary) / 'runtime'
         stage.mkdir()

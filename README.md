@@ -28,7 +28,10 @@ A game's definition selects its backend; applications start a game definition:
 ```
 
 Requires Emacs 29.1+ and ETAF with its dependencies on `load-path`. Install the
-backend used by your game from this repository:
+backend used by your game: `M-x etaf-gamekit-install-godot` installs the pinned
+Godot runtime from the package itself and writes only under
+`~/.cache/emacs-taf/game-engines`. A source checkout can run the same setup with
+`make engine`, or install the other backends:
 
 | Backend | Installation | Runtime |
 | --- | --- | --- |

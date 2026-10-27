@@ -1,12 +1,17 @@
 """Exercise native backend command, observation and snapshot contracts."""
 import json
+import hashlib
 import os
 from pathlib import Path
+import platform
 import queue
+import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'emacs-taf/game-engines'
@@ -85,8 +90,51 @@ class GodotBridgeContract(unittest.TestCase):
 
 
 class EngineSetupContract(unittest.TestCase):
+    def test_setup_installs_a_verified_release_and_replaces_a_stale_archive(self):
+        """A local release copy exercises download, repair and rejection offline."""
+        if sys.platform not in ('darwin', 'linux'):
+            self.skipTest('the pinned releases cover macOS and Linux')
+        machine = platform.machine().lower()
+        key = ('macos-universal' if sys.platform == 'darwin' else
+               f'linux-{"arm64" if machine in ("arm64", "aarch64") else machine}')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'package'
+            shutil.copytree(ROOT / 'native/godot', root / 'native/godot')
+            release = Path(directory) / 'release'
+            release.mkdir()
+            engine = release / 'godot'
+            engine.write_text('#!/bin/sh\necho 4.7.2.stable.official\n')
+            engine.chmod(0o755)
+            archive = release / 'pinned-godot.zip'
+            with zipfile.ZipFile(archive, 'w') as bundle:
+                bundle.write(engine, 'fake-godot')
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            manifest = {'version': '4.7.2', 'license': 'test',
+                        'platforms': {key: {'url': archive.as_uri(), 'sha256': digest,
+                                            'executable': 'fake-godot'}}}
+            (root / 'native/godot/engine-sources.json').write_text(json.dumps(manifest))
+            cache = Path(directory) / 'cache'
+            command = ['python3', str(root / 'native/godot/install-godot.py'), '--cache', str(cache)]
+            installed = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertTrue(Path(json.loads(installed.stdout)['godot']).is_symlink())
+            # An interrupted download leaves an archive that can never verify;
+            # the next run has to drop it instead of failing the same way again.
+            shutil.rmtree(next(cache.glob('godot-4.7.2-*')))
+            (cache / 'pinned-godot.zip').write_bytes(b'truncated')
+            repaired = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertIn('4.7.2', json.loads(repaired.stdout)['version'])
+            self.assertEqual(hashlib.sha256((cache / 'pinned-godot.zip').read_bytes()).hexdigest(), digest)
+            # Bytes that do not match the pinned checksum are refused and cleaned up.
+            shutil.rmtree(next(cache.glob('godot-4.7.2-*')))
+            manifest['platforms'][key]['sha256'] = '0' * 64
+            (root / 'native/godot/engine-sources.json').write_text(json.dumps(manifest))
+            rejected = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 1)
+            self.assertIn('Checksum mismatch', rejected.stderr)
+            self.assertFalse((cache / 'pinned-godot.zip').exists())
+
     def test_setup_manifest_missing_cache_and_existing_executable(self):
-        command = ['python3', str(ROOT / 'scripts/setup-engine.py')]
+        command = ['python3', str(ROOT / 'native/godot/install-godot.py')]
         manifest = subprocess.run([*command, '--manifest'], capture_output=True, text=True, check=True)
         self.assertIn('sha256', json.loads(manifest.stdout)['platforms']['macos-universal'])
         with tempfile.TemporaryDirectory() as directory:

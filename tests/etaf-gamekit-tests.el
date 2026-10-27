@@ -558,5 +558,29 @@
           (should (eq (etaf-gamekit-status session) 'ready)))
       (etaf-gamekit-test--dispose session))))
 
+(ert-deftest etaf-gamekit-install-godot-registers-an-existing-executable ()
+  "The packaged setup script installs a runtime without any network access."
+  (skip-unless (and (executable-find "python3") (not (eq system-type 'windows-nt))))
+  (let* ((directory (make-temp-file "etaf-gamekit-engine" t))
+         (godot (expand-file-name "fake-godot" directory))
+         (cache (expand-file-name "cache" directory))
+         (installed (expand-file-name "emacs-taf/game-engines/bin/godot" cache)))
+    (unwind-protect
+        (progn
+          (with-temp-file godot
+            (insert "#!/bin/sh\necho 4.7.2.stable.official\n"))
+          (set-file-modes godot #o755)
+          (let ((process-environment
+                 (cons (format "XDG_CACHE_HOME=%s" cache) process-environment))
+                (etaf-gamekit-godot-program installed))
+            (etaf-gamekit-install-godot godot)
+            (let ((deadline (+ (float-time) 60)))
+              (while (and (not (file-executable-p installed)) (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should (file-symlink-p installed))
+            (should (file-executable-p installed))
+            (should (equal (file-truename installed) (file-truename godot)))))
+      (delete-directory directory t))))
+
 (provide 'etaf-gamekit-tests)
 ;;; etaf-gamekit-tests.el ends here

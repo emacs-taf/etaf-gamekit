@@ -70,7 +70,8 @@
   (let ((project (plist-get options :project)))
     (unless (and (stringp project) (file-readable-p (expand-file-name "project.godot" project)))
       (signal 'etaf-gamekit-error '("Godot :project must contain project.godot")))
-    (list (etaf-gamekit--program etaf-gamekit-godot-program "run make engine")
+    (list (etaf-gamekit--program etaf-gamekit-godot-program
+                                 "install it with M-x etaf-gamekit-install-godot")
           "--headless" "--no-header" "--path" (expand-file-name project)
           "--script" (expand-file-name "native/godot/gamekit.gd" etaf-gamekit--directory))))
 

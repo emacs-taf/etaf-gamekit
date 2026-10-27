@@ -113,6 +113,11 @@
    "name": "etaf-gamekit-hosted-session-mounts-nothing-and-still-publishes",
    "file": "tests/etaf-gamekit-tests.el",
    "purpose": "A session started with :display nil leaves its buffer unmounted so one host is the only rendering, while its state and reactive view still publish."
+  },
+  {
+   "name": "etaf-gamekit-install-godot-registers-an-existing-executable",
+   "file": "tests/etaf-gamekit-tests.el",
+   "purpose": "The setup script shipped in the package installs a runtime from an existing executable into the configured cache without network access."
   }
  ]
 }

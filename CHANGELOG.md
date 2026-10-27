@@ -1,9 +1,26 @@
 # Changelog
 
-## Unreleased
+## [0.2.0] - 2026-10-27
+
+### Added
+
+- `etaf-gamekit-install-godot` installs the pinned Godot runtime from the
+  installed package in the background, so an archive installation reaches a
+  working game without a source checkout. With an explicit executable it
+  registers an existing Godot 4.7 or newer instead of downloading. The run
+  verifies the release checksum and writes only under the user cache; PATH and
+  init files stay untouched. Progress goes to `*ETAF engine install*`.
+- The archive ships `native/godot/install-godot.py` with its pinned checksums,
+  so archive installations reach a runtime without the development tooling.
 
 ### Changed
 
+- A missing Godot runtime now names `M-x etaf-gamekit-install-godot` instead of
+  the developer command `make engine`.
+- An interrupted download no longer leaves an archive that fails verification
+  on every retry: the setup script checks the announced length, refuses a body
+  that does not match the pinned SHA-256 and drops a stale cached archive
+  before downloading again.
 - A presentation mounts as its buffer's ETAF application, so the application
   record owns the lifetime and killing the buffer releases the session. The
   kit requires etaf 0.3.0 and etaf-ui 0.2.0; games keep the mode line they
