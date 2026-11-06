@@ -149,6 +149,24 @@ class EngineSetupContract(unittest.TestCase):
                                      capture_output=True, text=True, check=True)
             self.assertIn('4.', json.loads(checked.stdout)['version'])
 
+    def test_openspiel_setup_names_its_command_and_refuses_an_old_interpreter(self):
+        """A missing environment reports the install command and writes nothing."""
+        script = ROOT / 'native/openspiel/install-openspiel.py'
+        with tempfile.TemporaryDirectory() as directory:
+            command = ['python3', str(script), '--cache', directory]
+            missing = subprocess.run([*command, '--check'], capture_output=True, text=True)
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn('etaf-gamekit-install-openspiel', missing.stderr)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            # An interpreter below 3.11 is rejected before anything is written.
+            old = Path(directory) / 'python-old'
+            old.write_text('#!/bin/sh\necho 3.10.9\n')
+            old.chmod(0o755)
+            rejected = subprocess.run([*command, '--python', str(old)], capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 1)
+            self.assertIn('Python 3.11 or newer is required', rejected.stderr)
+            self.assertEqual(list(Path(directory).iterdir()), [old])
+
 
 class RuleKernelContracts(unittest.TestCase):
     def backend(self, name, game=None, expected_stderr=''):

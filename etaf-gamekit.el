@@ -33,7 +33,8 @@
 ;;
 ;; Variable: etaf-gamekit-openspiel-python-program
 ;; Python executable with OpenSpiel installed. Defaults to the isolated cache
-;; environment created by make engine-openspiel; configure before opening.
+;; environment that etaf-gamekit-install-openspiel creates; configure before
+;; opening.
 ;;
 ;; Function: etaf-gamekit-install-godot (&optional godot)
 ;;;###autoload (autoload 'etaf-gamekit-install-godot "etaf-gamekit-engines" nil t)
@@ -45,6 +46,17 @@
 ;; Installation runs in the background: progress goes to *ETAF engine install*
 ;; and the echo area reports the result. One run happens at a time, and a
 ;; failure keeps an already working runtime in place.
+;;
+;; Function: etaf-gamekit-install-openspiel (&optional python)
+;;;###autoload (autoload 'etaf-gamekit-install-openspiel "etaf-gamekit-engines" nil t)
+;; Install the pinned OpenSpiel environment that GameKit games run. PYTHON
+;; selects the interpreter of the private cache environment instead of the
+;; newest 3.11+ interpreter on PATH. The packaged setup script creates
+;; ~/.cache/emacs-taf/game-engines/openspiel, honouring XDG_CACHE_HOME, installs
+;; the pinned release and imports it to verify the result; an older environment
+;; is replaced only after the new one works, so a failure keeps it in place.
+;; Installation runs in the background: progress goes to *ETAF engine install*
+;; and the echo area reports the result. One run happens at a time.
 ;;
 ;; Macro: etaf-gamekit-define-game (name &rest properties)
 ;;;###autoload (autoload 'etaf-gamekit-define-game "etaf-gamekit" nil nil 'macro)

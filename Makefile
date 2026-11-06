@@ -1,7 +1,6 @@
 .DEFAULT_GOAL := check
 .NOTPARALLEL:
 EMACS ?= emacs
-GAMEKIT_PYTHON ?= python3
 GAMEKIT_CACHE ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/emacs-taf/game-engines
 LOAD_PATH = -L . -L lisp -L ../etaf-ui -L ../etaf -L ../ebox -L ../ecss
 SOURCES = lisp/etaf-gamekit-session.el lisp/etaf-gamekit-backends.el lisp/etaf-gamekit-engines.el lisp/etaf-gamekit-game.el lisp/etaf-gamekit-frame.el lisp/etaf-gamekit-view.el etaf-gamekit.el benchmarks/performance-scenarios.el tests/etaf-gamekit-tests.el
@@ -16,9 +15,7 @@ engine:
 engine-boardgame-io:
 	npm ci --prefix native/boardgame-io --ignore-scripts --no-audit --no-fund
 engine-openspiel:
-	$(GAMEKIT_PYTHON) -c 'import sys; assert sys.version_info >= (3, 11), "Set GAMEKIT_PYTHON to Python 3.11 or newer"'
-	$(GAMEKIT_PYTHON) -m venv "$(GAMEKIT_CACHE)/openspiel"
-	"$(GAMEKIT_CACHE)/openspiel/bin/python" -m pip install -r native/openspiel/requirements.txt
+	python3 native/openspiel/install-openspiel.py --cache "$(GAMEKIT_CACHE)" $(if $(GAMEKIT_PYTHON),--python "$(GAMEKIT_PYTHON)")
 engine-all: engine engine-boardgame-io engine-openspiel
 engine-check:
 	python3 native/godot/install-godot.py --check

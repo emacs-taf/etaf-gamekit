@@ -28,16 +28,17 @@ A game's definition selects its backend; applications start a game definition:
 ```
 
 Requires Emacs 29.1+ and ETAF with its dependencies on `load-path`. Install the
-backend used by your game: `M-x etaf-gamekit-install-godot` installs the pinned
-Godot runtime from the package itself and writes only under
-`~/.cache/emacs-taf/game-engines`. A source checkout can run the same setup with
-`make engine`, or install the other backends:
+backend used by your game from the package itself, which writes only under
+`~/.cache/emacs-taf/game-engines`:
 
 | Backend | Installation | Runtime |
 | --- | --- | --- |
-| Godot | `make engine` | Pinned Godot 4.7.2; macOS or Linux x86-64/arm64 |
+| Godot | `M-x etaf-gamekit-install-godot` | Pinned Godot 4.7.2; macOS or Linux x86-64/arm64 |
+| OpenSpiel | `M-x etaf-gamekit-install-openspiel` | Pinned OpenSpiel 2.0.2; Python 3.11+ |
 | boardgame.io | `make engine-boardgame-io` | Node.js 18+; pinned boardgame.io 0.50.2 |
-| OpenSpiel | `make engine-openspiel GAMEKIT_PYTHON=python3.11` | Python 3.11+; pinned OpenSpiel 2.0.2 |
+
+A source checkout can run the same setup with `make engine` and
+`make engine-openspiel`.
 
 The [manual](docs/manual.md) explains how to create a separate game project,
 configure a backend, compose a frontend, manage instances and add an adapter.

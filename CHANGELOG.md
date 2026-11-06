@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `etaf-gamekit-install-openspiel` installs the pinned OpenSpiel environment from
+  the installed package, so an archive installation can play OpenSpiel games
+  without a source checkout. The setup script builds a private cache environment
+  with any Python 3.11+, verifies the pinned release by importing it, and
+  replaces an older environment only after the new one works.
+
+### Changed
+
+- A missing OpenSpiel runtime now names `M-x etaf-gamekit-install-openspiel`
+  instead of the developer command `make engine-openspiel`.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added

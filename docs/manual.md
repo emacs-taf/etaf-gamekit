@@ -332,9 +332,16 @@ these files. Native invalid-move diagnostics remain on stderr.
 
 ### OpenSpiel
 
-`make engine-openspiel GAMEKIT_PYTHON=python3.11` creates a private cache
-environment and installs pinned OpenSpiel. Any Python 3.11+ executable may be
-supplied. `etaf-gamekit-openspiel-python-program` selects a different environment.
+`M-x etaf-gamekit-install-openspiel` creates a private environment at
+`~/.cache/emacs-taf/game-engines/openspiel`, honouring XDG_CACHE_HOME, and
+installs the pinned OpenSpiel from `native/openspiel/requirements.txt`. Setup
+needs Python 3.11+ and picks the newest one on PATH; with a prefix argument the
+command asks for an interpreter instead. The new environment is imported and
+checked against the pinned version before an older one is replaced, so a failed
+run keeps a working environment in place. Installation runs in the background:
+progress goes to `*ETAF engine install*` and the echo area reports the result.
+A source checkout can run `make engine-openspiel GAMEKIT_PYTHON=python3.11`
+instead. `etaf-gamekit-openspiel-python-program` selects a different environment.
 
 A game definition selects `openspiel` with `:game` containing an OpenSpiel game
 specification, plus optional integer `:player` and `:seed` (both default 0).

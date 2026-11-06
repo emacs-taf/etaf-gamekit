@@ -100,7 +100,8 @@
     (unless (and (stringp game) (not (string-empty-p game))
                  (integerp player) (>= player 0) (integerp seed))
       (signal 'etaf-gamekit-error '("OpenSpiel needs a game specification and integer player/seed")))
-    (list (etaf-gamekit--program etaf-gamekit-openspiel-python-program "run make engine-openspiel")
+    (list (etaf-gamekit--program etaf-gamekit-openspiel-python-program
+                                 "install it with M-x etaf-gamekit-install-openspiel")
           (expand-file-name "native/openspiel/bridge.py" etaf-gamekit--directory)
           "--game" game "--player" (number-to-string player) "--seed" (number-to-string seed))))
 
